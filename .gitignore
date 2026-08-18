@@ -1,0 +1,20 @@
+﻿# Node & Build Outputs
+node_modules/
+dist/
+dist-electron/
+release/
+
+# Environment & Local Secrets
+.env
+.env.local
+*.local
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS & Editor Files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

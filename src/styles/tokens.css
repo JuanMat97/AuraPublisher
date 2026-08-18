@@ -1,0 +1,59 @@
+/* ==========================================================================
+   AuraPublisher Design Tokens — Frosted Luxury Dark (#de2367 Ruby Edition)
+   ========================================================================== */
+
+@font-face {
+  font-family: 'Cal Sans';
+  src: url('/fonts/CalSans-Regular.ttf') format('truetype');
+  font-weight: 400 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  /* Brand Typography */
+  --font-display: 'Cal Sans', 'Lexend', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-sans: 'Inter', 'Lexend', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+
+  /* Primary Accent: Aura Ruby Magenta #de2367 */
+  --accent-gold: #de2367;
+  --accent-primary: #de2367;
+  --accent-primary-hover: #f43f7e;
+  --accent-primary-active: #be185d;
+  --accent-primary-glow: rgba(222, 35, 103, 0.45);
+  --accent-primary-subtle: rgba(222, 35, 103, 0.12);
+  --accent-primary-border: rgba(222, 35, 103, 0.35);
+
+  /* Deep Dark Surfaces */
+  --bg-deep: #07090e;
+  --bg-app: #0a0d14;
+  --bg-surface: rgba(18, 22, 32, 0.70);
+  --bg-surface-elevated: rgba(24, 29, 42, 0.85);
+  --bg-card: rgba(255, 255, 255, 0.035);
+  --bg-card-hover: rgba(255, 255, 255, 0.065);
+  --bg-card-active: rgba(222, 35, 103, 0.12);
+
+  /* Text & Typography */
+  --text-primary: #ffffff;
+  --text-body: #cbd5e1;
+  --text-muted: #94a3b8;
+  --text-subtle: #64748b;
+
+  /* Frosted Glass Borders */
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  --border-medium: rgba(255, 255, 255, 0.14);
+  --border-focus: #de2367;
+
+  /* Radii */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+  --radius-full: 9999px;
+
+  /* Shadows */
+  --shadow-card: 0 4px 20px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  --shadow-modal: 0 32px 80px rgba(0, 0, 0, 0.8), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
