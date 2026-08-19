@@ -68,6 +68,8 @@ export interface RenderWebGLRoomOptions {
   centerX?: number; // 0..1 (default 0.5)
   centerY?: number; // 0..1 (default 0.32)
   scaleWidth?: number; // 0.05..0.90 (default 0.42)
+  placementMode?: 'wall' | 'shelf';
+  lightSource3D?: { x: number; y: number; z: number };
   wallAngleDeg?: number; // -60..60 degrees
   pitchDeg?: number; // -75..75 degrees
   rollDeg?: number; // -180..180 degrees (Z-rotation, default 0)
@@ -309,13 +311,13 @@ export function drawExactFrameShadowToContext(
     return;
   }
 
-  const zFactor = Math.max(0, zDistance);
+  const zFactor = Math.max(0, Math.min(8.0, zDistance ?? 0));
   const distanceBlurMult = 1.0 + zFactor * 0.25;
   const distanceAlphaMult = 1.0 / (1.0 + zFactor * 0.12);
   const distanceOffsetMult = 1.0 + zFactor * 0.20;
 
   // Clamped pitch range [-75..75]
-  const clampedPitch = Math.max(-75, Math.min(75, pitchDeg));
+  const clampedPitch = Math.max(-75, Math.min(75, pitchDeg ?? 0));
   const pitchRad = (clampedPitch * Math.PI) / 180;
   const pitchTiltFactor = Math.abs(clampedPitch) / 75;
 
@@ -924,6 +926,8 @@ export function renderWebGLRoomComposite(options: RenderWebGLRoomOptions): HTMLC
     centerX = 0.5,
     centerY = 0.32,
     scaleWidth = 0.42,
+    placementMode = 'wall',
+    lightSource3D,
     wallAngleDeg = 0,
     pitchDeg = 0,
     rollDeg = 0,
@@ -1029,8 +1033,30 @@ export function renderWebGLRoomComposite(options: RenderWebGLRoomOptions): HTMLC
   const ambientLight = new THREE.AmbientLight(ambColor, finalAmbIntensity);
   scene.add(ambientLight);
 
+  // Light Vector Calculation & Angle Synchronization
+  let keyLightPos: THREE.Vector3;
+  let effectiveReflectionAngle = reflectionAngleDeg;
+  let effectiveShadowAngle = shadowAngleDeg;
+
+  if (lightSource3D) {
+    const lx = (lightSource3D.x - 0.5) * 12;
+    const ly = -(lightSource3D.y - 0.5) * 12;
+    const lz = (lightSource3D.z ?? 1.0) * 8;
+    keyLightPos = new THREE.Vector3(lx, ly, lz);
+
+    // Vector from artwork center to light source
+    const dx = lightSource3D.x - centerX;
+    const dy = -(lightSource3D.y - centerY); // Screen Y inverted to standard math +Y
+    const angleToLightDeg = ((Math.atan2(dy, dx) * 180) / Math.PI + 360) % 360;
+
+    effectiveReflectionAngle = angleToLightDeg;
+    effectiveShadowAngle = (angleToLightDeg + 180) % 360;
+  } else {
+    keyLightPos = new THREE.Vector3(4, 7, 5);
+  }
+
   const keyLight = new THREE.DirectionalLight(keyLightColor, keyLightIntensity);
-  keyLight.position.set(4, 7, 5);
+  keyLight.position.copy(keyLightPos);
   scene.add(keyLight);
 
   const fillLight = new THREE.DirectionalLight(0xffffff, 0.45 * roomLightScale);
@@ -1043,7 +1069,7 @@ export function renderWebGLRoomComposite(options: RenderWebGLRoomOptions): HTMLC
 
   const envTex = generateRaytracingEquirectangularMap({
     reflectionType,
-    angleDeg: reflectionAngleDeg,
+    angleDeg: effectiveReflectionAngle,
     intensity: reflectionIntensity,
     scale: reflectionScale,
     lightMode,
@@ -1065,43 +1091,83 @@ export function renderWebGLRoomComposite(options: RenderWebGLRoomOptions): HTMLC
   artTex.magFilter = THREE.LinearFilter;
   artTex.anisotropy = maxAniso;
 
-  // 5. 3D Artwork Mesh Setup with Support for rollDeg, thicknessCm, and zDistance
-  const group = new THREE.Group();
-  const normX = (centerX - 0.5) * bgW;
-  const normY = -(centerY - 0.5) * bgH;
-  const zDistCm = zDistance ?? 0;
-  const zDistM = zDistCm / 100;
-  group.position.set(normX, normY, 0.04 + zDistM);
-
-  group.rotation.x = -(pitchDeg * Math.PI) / 180;
-  group.rotation.y = (wallAngleDeg * Math.PI) / 180;
-  group.rotation.z = ((rollDeg ?? 0) * Math.PI) / 180;
+  // 5. Physics Clamping & 3D Artwork Mesh Setup
+  const clampedZDistCm = Math.max(0, Math.min(8.0, zDistance ?? 0));
+  const clampedPitchDeg = Math.max(-75, Math.min(75, pitchDeg ?? 0));
+  const zDistM = clampedZDistCm / 100;
 
   const totalW = bgW * scaleWidth;
-
   const naturalAspect = (artworkImage.naturalWidth || artworkImage.width || 1) / (artworkImage.naturalHeight || artworkImage.height || 1);
   const artAspect = (artworkWidthCm && artworkHeightCm && artworkWidthCm !== 70)
     ? (artworkWidthCm / artworkHeightCm)
     : naturalAspect;
   const totalH = totalW / artAspect;
 
+  const isShelf = placementMode === 'shelf';
+  const effectiveShelfContactShadow = isShelf || !!shelfContactShadow;
+
+  // In shelf mode, anchor bottom of frame to the shelf baseline
+  const baseNormY = -(centerY - 0.5) * bgH;
+  const normX = (centerX - 0.5) * bgW;
+  const normY = isShelf ? baseNormY + (totalH / 2) : baseNormY;
+
+  const group = new THREE.Group();
+  group.position.set(normX, normY, 0.04 + zDistM);
+  group.rotation.x = -(clampedPitchDeg * Math.PI) / 180;
+  group.rotation.y = (wallAngleDeg * Math.PI) / 180;
+  group.rotation.z = ((rollDeg ?? 0) * Math.PI) / 180;
+
   const gapM = panelsCount > 1 ? (gapCm / 100) * 0.4 : 0;
   const singleW = (totalW - gapM * (panelsCount - 1)) / panelsCount;
   const thickCm = Math.max(0.1, Math.min(12.0, thicknessCm ?? 1.0));
   const depthM = thickCm / 100;
 
-  const preset = finishPresets[finishType] || finishPresets.brillante;
-  const p = hasResina ? { ...preset, ...RESIN_OVERLAY } : preset;
-  const emissiveBoost = p.colorBoost ?? 1.0;
+  // PBR Physical Material Calibration
+  let roughness: number;
+  let clearcoat: number;
+  let clearcoatRoughness: number;
+  let envMapIntensity: number;
+  let specularIntensity: number;
+  let iridescence = 0;
+  let iridescenceIOR = 1.3;
+  let emissiveBoost = 1.0;
 
-  const roughness = p.roughness;
-  const clearcoat = p.clearcoat;
-  const clearcoatRoughness = reflectionRoughness ?? p.clearcoatRoughness;
-  const envMapIntensity = p.envMapIntensity;
+  if (hasResina || finishType === 'epoxy_resina') {
+    // Resina Epoxi: high-definition mirror highlight centered at lightSource3D vector
+    roughness = 0.008;
+    clearcoat = 1.0;
+    clearcoatRoughness = reflectionRoughness ?? 0.008;
+    envMapIntensity = 4.8;
+    specularIntensity = 2.4;
+    emissiveBoost = RESIN_OVERLAY.colorBoost ?? 1.06;
+  } else if (finishType === 'mate') {
+    // Vinilo Mate: subtle diffuse specular sheen (roughness 0.88, specularIntensity 0.35, clearcoat 0.05)
+    roughness = 0.88;
+    clearcoat = 0.05;
+    clearcoatRoughness = reflectionRoughness ?? 0.85;
+    envMapIntensity = 0.25;
+    specularIntensity = 0.35;
+    emissiveBoost = 1.0;
+  } else if (finishType === 'tornasolado') {
+    const p = finishPresets.tornasolado;
+    roughness = p.roughness ?? 0.15;
+    clearcoat = p.clearcoat ?? 0.70;
+    clearcoatRoughness = reflectionRoughness ?? (p.clearcoatRoughness ?? 0.06);
+    envMapIntensity = p.envMapIntensity ?? 2.5;
+    specularIntensity = p.specularIntensity ?? 1.5;
+    iridescence = p.iridescence ?? 1.0;
+    iridescenceIOR = p.iridescenceIOR ?? 1.45;
+  } else {
+    // Vinilo Brillante / Satinado: smooth specular gradient aligned with lightSource3D vector
+    const p = finishPresets[finishType] || finishPresets.brillante;
+    roughness = p.roughness ?? 0.20;
+    clearcoat = p.clearcoat ?? 0.65;
+    clearcoatRoughness = reflectionRoughness ?? (p.clearcoatRoughness ?? 0.08);
+    envMapIntensity = p.envMapIntensity ?? 1.8;
+    specularIntensity = p.specularIntensity ?? 1.4;
+  }
+
   const ior = 1.50;
-  const iridescence = p.iridescence ?? 0;
-  const iridescenceIOR = p.iridescenceIOR ?? 1.3;
-  const specularIntensity = p.specularIntensity ?? (hasResina ? 2.2 : 1.4);
 
   // Subtle natural exposure & temperature blend for seamless room integration
   const emissiveColor = neutralColor.clone().lerp(wallColor, wallHarmonization * 0.28);
@@ -1129,9 +1195,8 @@ export function renderWebGLRoomComposite(options: RenderWebGLRoomOptions): HTMLC
   const startX = -totalW / 2 + singleW / 2;
 
   // Directional edge shading on 4 side edges based on key light direction relative to frame
-  const keyLightPos = new THREE.Vector3(4, 7, 5);
   const frameEuler = new THREE.Euler(
-    -(pitchDeg * Math.PI) / 180,
+    -(clampedPitchDeg * Math.PI) / 180,
     (wallAngleDeg * Math.PI) / 180,
     ((rollDeg ?? 0) * Math.PI) / 180,
     'XYZ'
@@ -1226,15 +1291,15 @@ export function renderWebGLRoomComposite(options: RenderWebGLRoomOptions): HTMLC
   const shadowCanvas = generateExactFrameShadowTexture({
     shadowPreset,
     aspectRatio: totalW / totalH,
-    angleDeg: shadowAngleDeg,
+    angleDeg: effectiveShadowAngle,
     distance: shadowDistance,
     blur: shadowBlur,
     intensity: shadowIntensity,
     wallAngleDeg,
-    pitchDeg,
+    pitchDeg: clampedPitchDeg,
     rollDeg,
-    zDistance: zDistCm,
-    shelfContactShadow,
+    zDistance: clampedZDistCm,
+    shelfContactShadow: effectiveShelfContactShadow,
   });
 
   const sTex = new THREE.CanvasTexture(shadowCanvas);

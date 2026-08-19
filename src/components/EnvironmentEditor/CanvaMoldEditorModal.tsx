@@ -54,6 +54,7 @@ type DragTarget =
   | 'bottomCenter'
   | 'leftCenter'
   | 'rightCenter'
+  | 'lightSphere'
   | null;
 
 export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ environment, onClose }) => {
@@ -68,6 +69,11 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
   const initialCenterY = pos?.quad ? (pos.quad.topLeft.y + pos.quad.bottomLeft.y) / 2 : 0.32;
   const initialScale = pos?.quad ? Math.abs(pos.quad.topRight.x - pos.quad.topLeft.x) : 0.35;
 
+  // Placement Mode ('wall' = colgado en pared, 'shelf' = apoyado en repisa)
+  const [placementMode, setPlacementMode] = useState<'wall' | 'shelf'>(
+    pos?.placementMode ?? productConfig?.placementMode ?? 'wall'
+  );
+
   // 1. Spatial & 3D Parameters (Rehydrated from position)
   const [centerX, setCenterX] = useState(initialCenterX);
   const [centerY, setCenterY] = useState(initialCenterY);
@@ -77,6 +83,11 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
   const [rollAngle, setRollAngle] = useState(pos?.rollAngle ?? pos?.rollDeg ?? 0);
   const [thicknessCm, setThicknessCm] = useState(pos?.thicknessCm ?? 1.0);
   const [zDistance, setZDistance] = useState(pos?.zDistance ?? 0);
+
+  // Interactive 3D Light Sphere Gizmo position (screen-normalized coordinates { x, y, z })
+  const [lightPos3D, setLightPos3D] = useState<{ x: number; y: number; z: number }>(
+    pos?.lightSource3D ?? pos?.lightPos3D ?? productConfig?.lightSource3D ?? { x: 0.75, y: 0.25, z: 1.0 }
+  );
 
   // Snapping Guidelines & Hover / Ctrl Interaction State
   const [isSnappedX, setIsSnappedX] = useState(false);
@@ -141,7 +152,9 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
   const [shadowAngleDeg, setShadowAngleDeg] = useState(
     pos?.shadowAngleDeg ?? 90 + (pos?.reflectionAngleDeg ?? productConfig.reflectionAngleDeg ?? 0) * 0.5
   );
-  const [shadowContactOcclusion, setShadowContactOcclusion] = useState(pos?.shadowContactOcclusion ?? 40);
+  const [shadowContactOcclusion, setShadowContactOcclusion] = useState(
+    pos?.shadowContactOcclusion ?? (pos?.placementMode === 'shelf' ? 80 : 40)
+  );
 
   const [dragTarget, setDragTarget] = useState<DragTarget>(null);
   const dragStart = useRef({
@@ -526,7 +539,10 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
         scene.add(ambLight);
 
         const keyLight = new THREE.DirectionalLight(0xffffff, 1.4);
-        keyLight.position.set(4, 7, 5);
+        const initLightX = (lightPos3D.x - 0.5) * bgW * 1.5;
+        const initLightY = -(lightPos3D.y - 0.5) * bgH * 1.5;
+        const initLightZ = Math.max(1.5, lightPos3D.z * 5.0);
+        keyLight.position.set(initLightX, initLightY, initLightZ);
         scene.add(keyLight);
 
         const fillLight = new THREE.DirectionalLight(0xffffff, 0.5);
@@ -773,8 +789,9 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
     const normY = -(centerY - 0.5) * bgH;
     const scaleFactor = scaleWidth / initialScale;
 
-    // 3D Scene Mesh Position & 3-Axis Rotation
-    artGroup.position.set(normX, normY, 0.04 + zDistance / 100);
+    // 3D Scene Mesh Position & 3-Axis Rotation with Physics Clamps (prevents wall penetration)
+    const clampedZ = Math.max(0.01, 0.04 + Math.max(0, Math.min(8.0, zDistance)) / 100);
+    artGroup.position.set(normX, normY, clampedZ);
     artGroup.scale.set(scaleFactor, scaleFactor, 1);
     artGroup.rotation.set(
       -(pitchAngle * Math.PI) / 180,
@@ -828,6 +845,17 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
       center: projected[8],
     });
   }, [centerX, centerY, scaleWidth, wallAngle, pitchAngle, rollAngle, zDistance, initialScale]);
+
+  // Live Sync 3D KeyLight Position with Canvas Light Sphere Gizmo
+  useEffect(() => {
+    const { keyLight, bgW, bgH } = threeState.current;
+    if (keyLight) {
+      const lightWorldX = (lightPos3D.x - 0.5) * bgW * 1.5;
+      const lightWorldY = -(lightPos3D.y - 0.5) * bgH * 1.5;
+      const lightWorldZ = Math.max(1.5, lightPos3D.z * 5.0);
+      keyLight.position.set(lightWorldX, lightWorldY, lightWorldZ);
+    }
+  }, [lightPos3D]);
 
   // Dynamic Geometry Thickness update
   useEffect(() => {
@@ -900,7 +928,7 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
     shadowContactOcclusion,
   ]);
 
-  // Mouse Handlers with 9 Vector Pins + Proportional Scaling + Celestial Midpoint Controls + Ctrl Modes
+  // Mouse Handlers with 9 Vector Pins + Light Sphere Gizmo + Proportional Scaling + Celestial Midpoint Controls + Ctrl Modes
   const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!containerRef.current) return;
     const rect = containerRef.current.getBoundingClientRect();
@@ -908,7 +936,12 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
     const clickY = (e.clientY - rect.top) / rect.height;
 
     let hitTarget: DragTarget = null;
-    if (screenPins) {
+
+    // Check light sphere first (hit radius ~7%)
+    const lightDist = Math.hypot(clickX * 100 - lightPos3D.x * 100, clickY * 100 - lightPos3D.y * 100);
+    if (lightDist < 7) {
+      hitTarget = 'lightSphere';
+    } else if (screenPins) {
       const pinDist = (p: { x: number; y: number }) => Math.hypot(clickX * 100 - p.x, clickY * 100 - p.y);
       if (pinDist(screenPins.tc) < 6) hitTarget = 'topCenter';
       else if (pinDist(screenPins.bc) < 6) hitTarget = 'bottomCenter';
@@ -942,7 +975,10 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
     const curY = (e.clientY - rect.top) / rect.height;
 
     if (!dragTarget) {
-      if (screenPins) {
+      const lightDist = Math.hypot(curX * 100 - lightPos3D.x * 100, curY * 100 - lightPos3D.y * 100);
+      if (lightDist < 7) {
+        setHoveredTarget('lightSphere');
+      } else if (screenPins) {
         const pinDist = (p: { x: number; y: number }) => Math.hypot(curX * 100 - p.x, curY * 100 - p.y);
         if (pinDist(screenPins.tc) < 6) setHoveredTarget('topCenter');
         else if (pinDist(screenPins.bc) < 6) setHoveredTarget('bottomCenter');
@@ -954,6 +990,8 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
         else if (pinDist(screenPins.bl) < 6) setHoveredTarget('bottomLeft');
         else if (pinDist(screenPins.center) < 7) setHoveredTarget('center');
         else setHoveredTarget(null);
+      } else {
+        setHoveredTarget(null);
       }
       return;
     }
@@ -962,67 +1000,85 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
     const deltaY = curY - dragStart.current.y;
     const isCtrl = e.ctrlKey || e.metaKey || isCtrlActive;
 
-    if (dragTarget === 'center') {
+    if (dragTarget === 'lightSphere') {
+      // Free drag 3D Light Sphere across canvas
+      const newX = Math.max(0.05, Math.min(0.95, curX));
+      const newY = Math.max(0.05, Math.min(0.95, curY));
+      setLightPos3D((prev) => ({ ...prev, x: newX, y: newY }));
+
+      // Real-time calculated reflection angle towards light sphere
+      const frameCenterX = screenPins ? screenPins.center.x / 100 : centerX;
+      const frameCenterY = screenPins ? screenPins.center.y / 100 : centerY;
+      const angleRad = Math.atan2(newY - frameCenterY, newX - frameCenterX);
+      const rawAngleDeg = (angleRad * 180) / Math.PI;
+      const positiveReflDeg = Math.round(((rawAngleDeg % 360) + 360) % 360);
+      const oppShadowDeg = Math.round((positiveReflDeg + 180) % 360);
+
+      setReflectionAngleDeg(positiveReflDeg);
+      setShadowAngleDeg(oppShadowDeg);
+    } else if (dragTarget === 'center') {
       let rawX = dragStart.current.origX + deltaX;
       let rawY = dragStart.current.origY + deltaY;
 
-      // Smart Snapping (Center X = 0.5, Standard Hanging Y = 0.32, Center Y = 0.50)
-      if (Math.abs(rawX - 0.5) < 0.02) {
-        rawX = 0.5;
-        setIsSnappedX(true);
-      } else {
+      if (isCtrl) {
+        // Ctrl Snapping Disabler: 100% free movement
         setIsSnappedX(false);
-      }
-
-      if (Math.abs(rawY - 0.32) < 0.02) {
-        rawY = 0.32;
-        setIsSnappedY(true);
-      } else if (Math.abs(rawY - 0.5) < 0.02) {
-        rawY = 0.5;
-        setIsSnappedY(true);
-      } else {
         setIsSnappedY(false);
+      } else {
+        // Smart Snapping (Center X = 0.5, Standard Hanging Y = 0.32, Center Y = 0.50)
+        if (Math.abs(rawX - 0.5) < 0.02) {
+          rawX = 0.5;
+          setIsSnappedX(true);
+        } else {
+          setIsSnappedX(false);
+        }
+
+        if (Math.abs(rawY - 0.32) < 0.02) {
+          rawY = 0.32;
+          setIsSnappedY(true);
+        } else if (Math.abs(rawY - 0.5) < 0.02) {
+          rawY = 0.5;
+          setIsSnappedY(true);
+        } else {
+          setIsSnappedY(false);
+        }
       }
 
       setCenterX(Math.min(Math.max(rawX, 0.05), 0.95));
       setCenterY(Math.min(Math.max(rawY, 0.05), 0.95));
     } else if (dragTarget === 'topCenter') {
+      // Celestial Midpoint Pins + Ctrl: Aplanes/tilts frame (pitch), strictly locking wallAngle (yaw)
       if (isCtrl) {
-        // Ctrl + Drag: "Acostar objeto" extreme pitch angle (-75° to +75°)
         const newPitch = Math.max(-75, Math.min(75, Math.round(dragStart.current.origPitch - deltaY * 150)));
         setPitchAngle(newPitch);
       } else {
-        // Normal Drag: Adjusts pitchAngle (-30° to +30°)
         const newPitch = Math.max(-30, Math.min(30, Math.round(dragStart.current.origPitch - deltaY * 100)));
         setPitchAngle(newPitch);
       }
     } else if (dragTarget === 'bottomCenter') {
+      // Celestial Midpoint Pins + Ctrl: Aplanes/tilts frame (pitch), strictly locking wallAngle (yaw)
       if (isCtrl) {
-        // Ctrl + Drag: "Acostar objeto" extreme pitch angle (-75° to +75°)
         const newPitch = Math.max(-75, Math.min(75, Math.round(dragStart.current.origPitch + deltaY * 150)));
         setPitchAngle(newPitch);
       } else {
-        // Normal Drag: Adjusts pitchAngle (-30° to +30°)
         const newPitch = Math.max(-30, Math.min(30, Math.round(dragStart.current.origPitch + deltaY * 100)));
         setPitchAngle(newPitch);
       }
     } else if (dragTarget === 'leftCenter') {
+      // Yaw adjustment strictly locking pitchAngle
       if (isCtrl) {
-        // Ctrl + Drag: Planar perspective / extended yaw
         const newAngle = Math.max(-85, Math.min(85, Math.round(dragStart.current.origAngle - deltaX * 160)));
         setWallAngle(newAngle);
       } else {
-        // Normal Drag: Adjusts wallAngle / yaw (-60° to +60°)
         const newAngle = Math.max(-60, Math.min(60, Math.round(dragStart.current.origAngle - deltaX * 120)));
         setWallAngle(newAngle);
       }
     } else if (dragTarget === 'rightCenter') {
+      // Yaw adjustment strictly locking pitchAngle
       if (isCtrl) {
-        // Ctrl + Drag: Planar perspective / extended yaw
         const newAngle = Math.max(-85, Math.min(85, Math.round(dragStart.current.origAngle + deltaX * 160)));
         setWallAngle(newAngle);
       } else {
-        // Normal Drag: Adjusts wallAngle / yaw (-60° to +60°)
         const newAngle = Math.max(-60, Math.min(60, Math.round(dragStart.current.origAngle + deltaX * 120)));
         setWallAngle(newAngle);
       }
@@ -1041,7 +1097,7 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
         const newRoll = Math.max(-45, Math.min(45, Math.round(dragStart.current.origRoll + diffDeg)));
         setRollAngle(newRoll);
       } else {
-        // Normal Corner Drag: ONLY Scale (agrandar o achicar el cuadro proporcionalmente). Does NOT rotate.
+        // Normal Corner Drag: ONLY Scale (proportional scaling)
         const startDist = Math.hypot(
           dragStart.current.x * rect.width - centerPxX,
           dragStart.current.y * rect.height - centerPxY
@@ -1072,6 +1128,23 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
     setPitchAngle(0);
     setRollAngle(0);
     setZDistance(0);
+    setPlacementMode('wall');
+    setShadowContactOcclusion(40);
+  };
+
+  const handlePlacementModeChange = (mode: 'wall' | 'shelf') => {
+    setPlacementMode(mode);
+    if (mode === 'shelf') {
+      setShadowContactOcclusion(80);
+      if (pitchAngle === 0) {
+        setPitchAngle(15);
+      }
+    } else {
+      if (shadowContactOcclusion === 80) {
+        setShadowContactOcclusion(40);
+      }
+      setPitchAngle(0);
+    }
   };
 
   // Full Persistence: Save all 3D, optical, color & shadow parameters
@@ -1085,12 +1158,16 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
       positions: [
         {
           ...pos,
+          placementMode,
+          lightPos3D,
+          lightSource3D: lightPos3D,
           wallAngle,
           pitchDeg: pitchAngle,
           rollAngle,
           rollDeg: rollAngle,
           thicknessCm,
           zDistance,
+          shelfContactShadow: placementMode === 'shelf' || shadowContactOcclusion > 0,
           reflectionType,
           reflectionAngleDeg,
           reflectionIntensity,
@@ -1132,6 +1209,9 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
     clearThumbnailCache();
 
     setProductConfig({
+      placementMode,
+      lightPos3D,
+      lightSource3D: lightPos3D,
       wallAngle,
       pitchDeg: pitchAngle,
       reflectionAngleDeg,
@@ -1277,21 +1357,23 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
               userSelect: 'none',
               cursor: (() => {
                 if (dragTarget) {
+                  if (dragTarget === 'lightSphere') return 'grabbing';
                   if (isCtrlActive) return 'grabbing';
                   if (dragTarget === 'center') return 'grabbing';
                   if (dragTarget === 'topCenter' || dragTarget === 'bottomCenter') return 'ns-resize';
                   if (dragTarget === 'leftCenter' || dragTarget === 'rightCenter') return 'ew-resize';
-                  if (dragTarget === 'topLeft' || dragTarget === 'bottomRight') return 'nwse-resize';
-                  if (dragTarget === 'topRight' || dragTarget === 'bottomLeft') return 'nesw-resize';
+                  if (dragTarget === 'topLeft' || dragTarget === 'bottomRight') return isCtrlActive ? 'grabbing' : 'nwse-resize';
+                  if (dragTarget === 'topRight' || dragTarget === 'bottomLeft') return isCtrlActive ? 'grabbing' : 'nesw-resize';
                   return 'grabbing';
                 }
                 if (hoveredTarget) {
+                  if (hoveredTarget === 'lightSphere') return 'grab';
                   if (isCtrlActive) return 'grab';
                   if (hoveredTarget === 'center') return 'grab';
                   if (hoveredTarget === 'topCenter' || hoveredTarget === 'bottomCenter') return 'ns-resize';
                   if (hoveredTarget === 'leftCenter' || hoveredTarget === 'rightCenter') return 'ew-resize';
-                  if (hoveredTarget === 'topLeft' || hoveredTarget === 'bottomRight') return 'nwse-resize';
-                  if (hoveredTarget === 'topRight' || hoveredTarget === 'bottomLeft') return 'nesw-resize';
+                  if (hoveredTarget === 'topLeft' || hoveredTarget === 'bottomRight') return isCtrlActive ? 'grab' : 'nwse-resize';
+                  if (hoveredTarget === 'topRight' || hoveredTarget === 'bottomLeft') return isCtrlActive ? 'grab' : 'nesw-resize';
                   return 'grab';
                 }
                 return isCtrlActive ? 'grab' : 'default';
@@ -1415,15 +1497,17 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                   <RotateCcw size={12} />
                   <span>
                     {dragTarget === 'topCenter' || dragTarget === 'bottomCenter' || hoveredTarget === 'topCenter' || hoveredTarget === 'bottomCenter'
-                      ? `Acostar objeto: ${pitchAngle > 0 ? `+${pitchAngle}°` : `${pitchAngle}°`} (Ctrl activo)`
+                      ? `Acostar objeto: ${pitchAngle > 0 ? `+${pitchAngle}°` : `${pitchAngle}°`} (Ctrl activo - Yaw bloqueado)`
                       : dragTarget === 'leftCenter' || dragTarget === 'rightCenter' || hoveredTarget === 'leftCenter' || hoveredTarget === 'rightCenter'
-                      ? `Perspectiva / Giro: ${wallAngle > 0 ? `+${wallAngle}°` : `${wallAngle}°`} (Ctrl activo)`
+                      ? `Perspectiva / Giro: ${wallAngle > 0 ? `+${wallAngle}°` : `${wallAngle}°`} (Ctrl activo - Pitch bloqueado)`
+                      : dragTarget === 'center' || hoveredTarget === 'center'
+                      ? `Movimiento libre (Snapping magnético desactivado)`
                       : `Rotación Z: ${rollAngle > 0 ? `+${rollAngle}°` : `${rollAngle}°`} (Ctrl activo)`}
                   </span>
                 </div>
               )}
 
-              {/* Vector Quad Polygon Outline */}
+              {/* Vector Quad Polygon Outline & Subtle Ray to Light Sphere */}
               {screenPins && (
                 <svg
                   style={{
@@ -1442,8 +1526,47 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                     strokeWidth="1.5"
                     strokeDasharray="4 4"
                   />
+                  {/* Subtle Ray from Frame Center to 3D Light Sphere */}
+                  <line
+                    x1={`${screenPins.center.x}%`}
+                    y1={`${screenPins.center.y}%`}
+                    x2={`${lightPos3D.x * 100}%`}
+                    y2={`${lightPos3D.y * 100}%`}
+                    stroke="#fbbf24"
+                    strokeWidth="1.5"
+                    strokeDasharray="3 3"
+                    opacity={dragTarget === 'lightSphere' || hoveredTarget === 'lightSphere' ? 0.95 : 0.6}
+                  />
                 </svg>
               )}
+
+              {/* Interactive 3D Light Sphere Gizmo on Canvas */}
+              <div
+                title="Foco de Luz 3D: Arrastra para posicionar el sol, reflejos y sombras"
+                style={{
+                  position: 'absolute',
+                  left: `${lightPos3D.x * 100}%`,
+                  top: `${lightPos3D.y * 100}%`,
+                  transform: 'translate(-50%, -50%)',
+                  width: '28px',
+                  height: '28px',
+                  borderRadius: '50%',
+                  background: 'radial-gradient(circle at 35% 35%, #fffbeb 15%, #f59e0b 65%, #b45309 100%)',
+                  border: '2px solid #ffffff',
+                  boxShadow:
+                    hoveredTarget === 'lightSphere' || dragTarget === 'lightSphere'
+                      ? '0 0 24px #f59e0b, 0 0 45px #fbbf24, 0 0 60px rgba(245, 158, 11, 0.85)'
+                      : '0 0 14px #f59e0b, 0 0 26px rgba(245, 158, 11, 0.55)',
+                  pointerEvents: 'none',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  zIndex: 25,
+                  transition: dragTarget === 'lightSphere' ? 'none' : 'box-shadow 0.2s ease, transform 0.2s ease',
+                }}
+              >
+                <Sun size={15} strokeWidth={2.4} color="#78350f" />
+              </div>
 
               {/* Interactive Vector Pin Handles */}
               {screenPins && (
@@ -1632,13 +1755,16 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                 }}
               >
                 <span>
-                  📍 <strong>Centro</strong>: Mover
+                  📍 <strong>Centro</strong>: Mover (Ctrl: libre)
+                </span>
+                <span>
+                  ☀️ <strong>Sol</strong>: Posición Luz 3D
                 </span>
                 <span>
                   ↔️/↕️ <strong>Pines Celestes</strong>: Inclinación / Pared (Ctrl: Acostar)
                 </span>
                 <span>
-                  ⤡ <strong>Esquinas</strong>: Escala proporcional (Ctrl: Rotación Z)
+                  ⤡ <strong>Esquinas</strong>: Escala (Ctrl: Rotación Z)
                 </span>
               </div>
             </div>
@@ -1752,6 +1878,94 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                   paddingRight: '2px',
                 }}
               >
+                {/* 0. Modo de Colocación (Pared vs Repisa) */}
+                <div
+                  style={{
+                    background: 'rgba(255, 255, 255, 0.03)',
+                    padding: '12px 14px',
+                    borderRadius: '12px',
+                    border: '1px solid rgba(255, 255, 255, 0.08)',
+                  }}
+                >
+                  <span style={{ fontSize: '11px', fontWeight: 600, color: '#ffffff', display: 'block', marginBottom: '8px' }}>
+                    📐 Modo de Colocación
+                  </span>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
+                    <button
+                      onClick={() => handlePlacementModeChange('wall')}
+                      style={{
+                        padding: '8px 10px',
+                        borderRadius: '8px',
+                        fontSize: '11px',
+                        fontWeight: placementMode === 'wall' ? 700 : 500,
+                        border:
+                          placementMode === 'wall'
+                            ? '1.5px solid var(--accent-primary)'
+                            : '1px solid rgba(255, 255, 255, 0.08)',
+                        background:
+                          placementMode === 'wall'
+                            ? 'var(--accent-primary-subtle)'
+                            : 'rgba(255, 255, 255, 0.03)',
+                        color: placementMode === 'wall' ? '#ffffff' : '#94a3b8',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '6px',
+                        transition: 'all 0.15s ease',
+                      }}
+                    >
+                      <span style={{ fontSize: '13px' }}>🖼️</span>
+                      <span>Pared (Colgado)</span>
+                    </button>
+                    <button
+                      onClick={() => handlePlacementModeChange('shelf')}
+                      style={{
+                        padding: '8px 10px',
+                        borderRadius: '8px',
+                        fontSize: '11px',
+                        fontWeight: placementMode === 'shelf' ? 700 : 500,
+                        border:
+                          placementMode === 'shelf'
+                            ? '1.5px solid var(--accent-primary)'
+                            : '1px solid rgba(255, 255, 255, 0.08)',
+                        background:
+                          placementMode === 'shelf'
+                            ? 'var(--accent-primary-subtle)'
+                            : 'rgba(255, 255, 255, 0.03)',
+                        color: placementMode === 'shelf' ? '#ffffff' : '#94a3b8',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '6px',
+                        transition: 'all 0.15s ease',
+                      }}
+                    >
+                      <span style={{ fontSize: '13px' }}>🪵</span>
+                      <span>Repisa (Apoyado)</span>
+                    </button>
+                  </div>
+                  {placementMode === 'shelf' && (
+                    <div
+                      style={{
+                        marginTop: '8px',
+                        padding: '6px 10px',
+                        borderRadius: '6px',
+                        background: 'rgba(56, 189, 248, 0.08)',
+                        border: '1px solid rgba(56, 189, 248, 0.2)',
+                        fontSize: '10px',
+                        color: '#38bdf8',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                      }}
+                    >
+                      <span>🪵 Sombra de oclusión en base activa (80%) y soporte para apoyar/acostar.</span>
+                    </div>
+                  )}
+                </div>
+
                 {/* 1. Grosor del Cuadro (Espesor 3D con Canto) */}
                 <div
                   style={{
@@ -1926,7 +2140,7 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                         gap: '3px',
                       }}
                     >
-                      <RotateCcw size={10} /> 0º
+                      <RotateCcw size={10} /> 0º (Vertical)
                     </button>
                     <button
                       onClick={() => setPitchAngle(15)}
@@ -1941,10 +2155,10 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                         cursor: 'pointer',
                       }}
                     >
-                      +15º Arriba
+                      {placementMode === 'shelf' ? 'Apoyado (+15º)' : '+15º Arriba'}
                     </button>
                     <button
-                      onClick={() => setPitchAngle(-15)}
+                      onClick={() => setPitchAngle(placementMode === 'shelf' ? 35 : -15)}
                       style={{
                         padding: '4px',
                         borderRadius: '6px',
@@ -1956,10 +2170,10 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                         cursor: 'pointer',
                       }}
                     >
-                      -15º Abajo
+                      {placementMode === 'shelf' ? 'Inclinado (+35º)' : '-15º Abajo'}
                     </button>
                     <button
-                      onClick={() => setPitchAngle(60)}
+                      onClick={() => setPitchAngle(70)}
                       style={{
                         padding: '4px',
                         borderRadius: '6px',
@@ -1971,7 +2185,7 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                         cursor: 'pointer',
                       }}
                     >
-                      Acostar (60º)
+                      Acostar (70º)
                     </button>
                   </div>
                 </div>

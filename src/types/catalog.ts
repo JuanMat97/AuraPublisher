@@ -129,6 +129,8 @@ export interface CanvaMoldConfig {
   centerY?: number;
   scaleWidth?: number;
   fitMode?: 'contain' | 'cover';
+  placementMode?: 'wall' | 'shelf';
+  lightSource3D?: { x: number; y: number; z: number };
   vinylFinish?: VinylFinish;
   hasResina?: boolean;
   lightMode?: AmbientLightMode;

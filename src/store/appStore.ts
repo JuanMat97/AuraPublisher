@@ -46,6 +46,9 @@ export interface ProductConfigState {
   resinGloss: number;
   wallAngle: number;
   pitchDeg: number;
+  placementMode?: 'wall' | 'shelf';
+  lightPos3D?: { x: number; y: number; z: number };
+  lightSource3D?: { x: number; y: number; z: number };
   setSpacingCm: number;
   setMode: SetMode;
   title: string;

@@ -43,6 +43,8 @@ export function renderSmartMoldComposite(options: RenderSmartMoldOptions): HTMLC
     centerX: mold.centerX ?? 0.5,
     centerY: mold.centerY ?? 0.32,
     scaleWidth: mold.scaleWidth ?? 0.42,
+    placementMode: mold.placementMode,
+    lightSource3D: mold.lightSource3D,
     wallAngleDeg: mold.wallAngle ?? 0,
     pitchDeg: mold.pitchDeg ?? 0,
     rollDeg: mold.rollDeg ?? 0,

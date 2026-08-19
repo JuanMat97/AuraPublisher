@@ -118,6 +118,8 @@ export async function generateFullMockupSet(
         centerX,
         centerY,
         scaleWidth,
+        placementMode: pos.placementMode,
+        lightSource3D: pos.lightSource3D,
         fitMode: 'contain',
         vinylFinish: productConfig.vinylFinish,
         hasResina: productConfig.hasResina,

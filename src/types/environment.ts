@@ -24,6 +24,14 @@ export type WeatherPreset =
   | 'sunny'
   | 'cloudy';
 
+export type PlacementMode = 'wall' | 'shelf';
+
+export interface LightSource3D {
+  x: number;
+  y: number;
+  z: number;
+}
+
 export interface MockupPosition {
   id: string;
   name: string;
@@ -33,6 +41,9 @@ export interface MockupPosition {
   shadowOffsetX?: number;
   shadowOffsetY?: number;
   // Per-environment optical and spatial overrides. The product finish remains global.
+  placementMode?: PlacementMode;
+  lightPos3D?: LightSource3D;
+  lightSource3D?: LightSource3D;
   wallAngle?: number;
   pitchDeg?: number;
   rollDeg?: number;
