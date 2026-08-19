@@ -32,9 +32,12 @@ const MockupCardPreview: React.FC<{
     if (!canvas) return;
 
     const pos = env.positions[0];
+    const centerX = pos?.centerX ?? (pos?.quad ? (pos.quad.topLeft.x + pos.quad.topRight.x) / 2 : 0.5);
+    const centerY = pos?.centerY ?? (pos?.quad ? (pos.quad.topLeft.y + pos.quad.bottomLeft.y) / 2 : 0.32);
+    const scaleWidth = pos?.scaleWidth ?? (pos?.quad ? Math.abs(pos.quad.topRight.x - pos.quad.topLeft.x) : 0.42);
     const adjustKey = pos?.adjust ? JSON.stringify(pos.adjust) : 'default';
     const slotsKey = artworkSlots.map((s) => s?.filename || 'none').join('|');
-    const cacheKey = `${env.id}:${pos?.wallAngle}:${pos?.pitchDeg}:${pos?.rollDeg}:${pos?.thicknessCm}:${pos?.zDistance}:${pos?.reflectionType}:${pos?.reflectionAngleDeg}:${pos?.reflectionIntensity}:${pos?.reflectionBrightness}:${pos?.reflectionContrast}:${pos?.shadowPreset}:${pos?.shadowBlur}:${pos?.shadowStyleIntensity}:${pos?.wallHarmonization}:${adjustKey}:${artworkPath || 'default'}:${slotsKey}:${setMode}:${vinylFinish}:${hasResina}:${lightMode}:${sizeId}`;
+    const cacheKey = `${env.id}:${centerX}:${centerY}:${scaleWidth}:${pos?.wallAngle}:${pos?.pitchDeg}:${pos?.rollDeg}:${pos?.thicknessCm}:${pos?.zDistance}:${pos?.reflectionType}:${pos?.reflectionAngleDeg}:${pos?.reflectionIntensity}:${pos?.reflectionBrightness}:${pos?.reflectionContrast}:${pos?.shadowPreset}:${pos?.shadowBlur}:${pos?.shadowStyleIntensity}:${pos?.wallHarmonization}:${adjustKey}:${artworkPath || 'default'}:${slotsKey}:${setMode}:${vinylFinish}:${hasResina}:${lightMode}:${sizeId}`;
     if (thumbnailCache.has(cacheKey)) {
       const cached = thumbnailCache.get(cacheKey)!;
       canvas.width = cached.width;
@@ -67,10 +70,6 @@ const MockupCardPreview: React.FC<{
         }
 
         if (!alive) return;
-
-        const centerX = pos?.quad ? (pos.quad.topLeft.x + pos.quad.topRight.x) / 2 : 0.5;
-        const centerY = pos?.quad ? (pos.quad.topLeft.y + pos.quad.bottomLeft.y) / 2 : 0.32;
-        const scaleWidth = pos?.quad ? Math.abs(pos.quad.topRight.x - pos.quad.topLeft.x) : 0.42;
 
         const composite = renderSmartMoldComposite({
           envImage: envImg,
@@ -143,8 +142,10 @@ export const MockupGridView: React.FC = () => {
     productConfig,
   } = useAppStore();
 
-  const [editingEnv, setEditingEnv] = useState<EnvironmentScene | null>(null);
+  const [editingEnvId, setEditingEnvId] = useState<string | null>(null);
   const [isDropHovered, setIsDropHovered] = useState(false);
+
+  const editingEnv = environments.find((e) => e.id === editingEnvId) || null;
 
   const sizeOpt = CATALOG_SIZES.find((s) => s.id === productConfig.sizeId) || CATALOG_SIZES[0];
   const panelsCount = sizeOpt.panelsCount || 1;
@@ -190,7 +191,7 @@ export const MockupGridView: React.FC = () => {
           isCustom: true,
         };
         addCustomEnvironment(newEnv);
-        setEditingEnv(newEnv);
+        setEditingEnvId(newEnv.id);
       }
     };
     fileInput.click();
@@ -424,7 +425,7 @@ export const MockupGridView: React.FC = () => {
                 {/* Top-Right Action Buttons: Calibrate & Delete */}
                 <div style={{ position: 'absolute', top: '8px', right: '8px', display: 'flex', gap: '4px', zIndex: 5 }}>
                   <button
-                    onClick={() => setEditingEnv(env)}
+                    onClick={() => setEditingEnvId(env.id)}
                     style={{
                       background: 'rgba(10, 12, 18, 0.85)',
                       backdropFilter: 'blur(8px)',
@@ -569,7 +570,7 @@ export const MockupGridView: React.FC = () => {
       {editingEnv && (
         <CanvaMoldEditorModal
           environment={editingEnv}
-          onClose={() => setEditingEnv(null)}
+          onClose={() => setEditingEnvId(null)}
         />
       )}
     </div>

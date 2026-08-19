@@ -36,6 +36,7 @@ import {
   Sparkles,
   CloudSun,
   Box,
+  Grid,
 } from 'lucide-react';
 
 interface CanvaMoldEditorModalProps {
@@ -65,28 +66,31 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
   const [activeTab, setActiveTab] = useState<EditorTab>('perspective');
 
   const pos = environment.positions[0];
-  const initialCenterX = pos?.quad ? (pos.quad.topLeft.x + pos.quad.topRight.x) / 2 : 0.5;
-  const initialCenterY = pos?.quad ? (pos.quad.topLeft.y + pos.quad.bottomLeft.y) / 2 : 0.32;
-  const initialScale = pos?.quad ? Math.abs(pos.quad.topRight.x - pos.quad.topLeft.x) : 0.35;
+  const initialCenterX = pos?.centerX ?? (pos?.quad ? (pos.quad.topLeft.x + pos.quad.topRight.x) / 2 : 0.5);
+  const initialCenterY = pos?.centerY ?? (pos?.quad ? (pos.quad.topLeft.y + pos.quad.bottomLeft.y) / 2 : 0.32);
+  const initialScale = pos?.scaleWidth ?? (pos?.quad ? Math.abs(pos.quad.topRight.x - pos.quad.topLeft.x) : 0.42);
 
   // Placement Mode ('wall' = colgado en pared, 'shelf' = apoyado en repisa)
   const [placementMode, setPlacementMode] = useState<'wall' | 'shelf'>(
-    pos?.placementMode ?? productConfig?.placementMode ?? 'wall'
+    pos?.placementMode ?? 'wall'
   );
 
   // 1. Spatial & 3D Parameters (Rehydrated from position)
   const [centerX, setCenterX] = useState(initialCenterX);
   const [centerY, setCenterY] = useState(initialCenterY);
   const [scaleWidth, setScaleWidth] = useState(Math.max(0.05, Math.min(0.90, initialScale)));
-  const [wallAngle, setWallAngle] = useState(pos?.wallAngle ?? productConfig.wallAngle ?? 0);
-  const [pitchAngle, setPitchAngle] = useState(pos?.pitchDeg ?? productConfig.pitchDeg ?? 0);
-  const [rollAngle, setRollAngle] = useState(pos?.rollAngle ?? pos?.rollDeg ?? 0);
+  const [wallAngle, setWallAngle] = useState(pos?.wallAngle ?? 0);
+  const [pitchAngle, setPitchAngle] = useState(pos?.pitchDeg ?? 0);
+  const [rollAngle, setRollAngle] = useState(pos?.rollDeg ?? pos?.rollAngle ?? 0);
   const [thicknessCm, setThicknessCm] = useState(pos?.thicknessCm ?? 1.0);
   const [zDistance, setZDistance] = useState(pos?.zDistance ?? 0);
 
+  // 3D Wall Perspective Grid Visibility
+  const [showWallGrid, setShowWallGrid] = useState<boolean>(true);
+
   // Interactive 3D Light Sphere Gizmo position (screen-normalized coordinates { x, y, z })
   const [lightPos3D, setLightPos3D] = useState<{ x: number; y: number; z: number }>(
-    pos?.lightSource3D ?? pos?.lightPos3D ?? productConfig?.lightSource3D ?? { x: 0.75, y: 0.25, z: 1.0 }
+    pos?.lightPos3D ?? pos?.lightSource3D ?? { x: 0.75, y: 0.25, z: 1.0 }
   );
 
   // Snapping Guidelines & Hover / Ctrl Interaction State
@@ -194,6 +198,7 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
     artGroup: THREE.Group | null;
     artMeshes: THREE.Mesh[];
     shadowMesh: THREE.Mesh | null;
+    wallGridMesh: THREE.LineSegments | null;
     shadowCanvas: HTMLCanvasElement | null;
     shadowTexture: THREE.CanvasTexture | null;
     frontMaterials: THREE.MeshPhysicalMaterial[];
@@ -221,6 +226,7 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
     artGroup: null,
     artMeshes: [],
     shadowMesh: null,
+    wallGridMesh: null,
     shadowCanvas: null,
     shadowTexture: null,
     frontMaterials: [],
@@ -714,6 +720,28 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
         const shadowMesh = new THREE.Mesh(new THREE.PlaneGeometry(totalW * 2.2, totalH * 2.2), shadowMat);
         scene.add(shadowMesh);
 
+        // 3D Wall Perspective Wireframe Grid
+        const gridSize = 4.0;
+        const gridDivisions = 16;
+        const step = gridSize / gridDivisions;
+        const half = gridSize / 2;
+        const linePoints: THREE.Vector3[] = [];
+        for (let i = -half; i <= half + 0.0001; i += step) {
+          linePoints.push(new THREE.Vector3(-half, i, 0), new THREE.Vector3(half, i, 0));
+          linePoints.push(new THREE.Vector3(i, -half, 0), new THREE.Vector3(i, half, 0));
+        }
+        const gridGeom = new THREE.BufferGeometry().setFromPoints(linePoints);
+        const gridMat = new THREE.LineBasicMaterial({
+          color: 0x38bdf8,
+          transparent: true,
+          opacity: 0.25,
+          depthWrite: false,
+        });
+        const wallGridMesh = new THREE.LineSegments(gridGeom, gridMat);
+        wallGridMesh.position.set(0, 0, 0.002);
+        wallGridMesh.visible = showWallGrid;
+        scene.add(wallGridMesh);
+
         const sample = sampleWallLighting(envImg, initialCenterX, initialCenterY, initialScale);
         setWallSample(sample);
 
@@ -726,6 +754,7 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
           artGroup,
           artMeshes,
           shadowMesh,
+          wallGridMesh,
           shadowCanvas,
           shadowTexture,
           frontMaterials,
@@ -780,9 +809,9 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
     };
   }, [environment, selectedImage, artworkSlots, panelsCount, productConfig.setMode]);
 
-  // 2. Dynamic 3D Transform & Sub-Pixel Vector Pin Projection (7 Pins)
+  // 2. Dynamic 3D Transform & Sub-Pixel Vector Pin Projection (9 Pins)
   useEffect(() => {
-    const { artGroup, shadowMesh, camera, bgW, bgH, totalW, totalH } = threeState.current;
+    const { artGroup, shadowMesh, wallGridMesh, camera, bgW, bgH, totalW, totalH } = threeState.current;
     if (!artGroup || !shadowMesh || !camera) return;
 
     const normX = (centerX - 0.5) * bgW;
@@ -806,6 +835,16 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
       (wallAngle * Math.PI) / 180,
       (rollAngle * Math.PI) / 180
     );
+
+    if (wallGridMesh) {
+      wallGridMesh.position.set(normX, normY, 0.002);
+      wallGridMesh.rotation.set(
+        -(pitchAngle * Math.PI) / 180,
+        (wallAngle * Math.PI) / 180,
+        (rollAngle * Math.PI) / 180
+      );
+      wallGridMesh.visible = showWallGrid;
+    }
 
     artGroup.updateMatrixWorld(true);
 
@@ -844,7 +883,7 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
       rc: projected[7],
       center: projected[8],
     });
-  }, [centerX, centerY, scaleWidth, wallAngle, pitchAngle, rollAngle, zDistance, initialScale]);
+  }, [centerX, centerY, scaleWidth, wallAngle, pitchAngle, rollAngle, zDistance, initialScale, showWallGrid]);
 
   // Live Sync 3D KeyLight Position with Canvas Light Sphere Gizmo
   useEffect(() => {
@@ -1158,15 +1197,24 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
       positions: [
         {
           ...pos,
-          placementMode,
-          lightPos3D,
-          lightSource3D: lightPos3D,
+          centerX,
+          centerY,
+          scaleWidth,
           wallAngle,
           pitchDeg: pitchAngle,
           rollAngle,
           rollDeg: rollAngle,
           thicknessCm,
           zDistance,
+          placementMode,
+          lightPos3D,
+          lightSource3D: lightPos3D,
+          shadowBlur,
+          shadowIntensity,
+          shadowStyleIntensity: shadowIntensity,
+          shadowAngleDeg,
+          shadowDistance,
+          shadowContactOcclusion,
           shelfContactShadow: placementMode === 'shelf' || shadowContactOcclusion > 0,
           reflectionType,
           reflectionAngleDeg,
@@ -1178,11 +1226,6 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
           weatherPreset,
           wallHarmonization,
           shadowPreset,
-          shadowBlur,
-          shadowStyleIntensity: shadowIntensity,
-          shadowAngleDeg,
-          shadowDistance,
-          shadowContactOcclusion,
           temperature,
           tint,
           brightness,
@@ -1207,6 +1250,7 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
 
     updateEnvironment(updatedEnv);
     clearThumbnailCache();
+    useAppStore.getState().syncToStore();
 
     setProductConfig({
       placementMode,
@@ -1548,15 +1592,15 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                   left: `${lightPos3D.x * 100}%`,
                   top: `${lightPos3D.y * 100}%`,
                   transform: 'translate(-50%, -50%)',
-                  width: '28px',
-                  height: '28px',
+                  width: '24px',
+                  height: '24px',
                   borderRadius: '50%',
                   background: 'radial-gradient(circle at 35% 35%, #fffbeb 15%, #f59e0b 65%, #b45309 100%)',
-                  border: '2px solid #ffffff',
+                  border: '1.5px solid rgba(255, 255, 255, 0.9)',
                   boxShadow:
                     hoveredTarget === 'lightSphere' || dragTarget === 'lightSphere'
-                      ? '0 0 24px #f59e0b, 0 0 45px #fbbf24, 0 0 60px rgba(245, 158, 11, 0.85)'
-                      : '0 0 14px #f59e0b, 0 0 26px rgba(245, 158, 11, 0.55)',
+                      ? '0 0 16px rgba(245, 158, 11, 0.6), 0 0 4px #ffffff'
+                      : '0 0 10px rgba(245, 158, 11, 0.4)',
                   pointerEvents: 'none',
                   display: 'flex',
                   alignItems: 'center',
@@ -1565,7 +1609,7 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                   transition: dragTarget === 'lightSphere' ? 'none' : 'box-shadow 0.2s ease, transform 0.2s ease',
                 }}
               >
-                <Sun size={15} strokeWidth={2.4} color="#78350f" />
+                <Sun size={13} strokeWidth={2.2} color="#78350f" />
               </div>
 
               {/* Interactive Vector Pin Handles */}
@@ -1878,7 +1922,48 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                   paddingRight: '2px',
                 }}
               >
-                {/* 0. Modo de Colocación (Pared vs Repisa) */}
+                {/* 0. Grilla de Pared 3D en Profundidad Toggle */}
+                <div
+                  style={{
+                    background: 'rgba(56, 189, 248, 0.06)',
+                    padding: '10px 14px',
+                    borderRadius: '12px',
+                    border: '1px solid rgba(56, 189, 248, 0.2)',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <Grid size={14} color="#38bdf8" />
+                    <div>
+                      <span style={{ fontSize: '11px', fontWeight: 700, color: '#ffffff', display: 'block' }}>
+                        Grilla 3D de Pared
+                      </span>
+                      <span style={{ fontSize: '9.5px', color: '#94a3b8' }}>
+                        Plano guía de perspectiva en pared
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setShowWallGrid(!showWallGrid)}
+                    style={{
+                      padding: '4px 10px',
+                      borderRadius: '6px',
+                      fontSize: '10px',
+                      fontWeight: 700,
+                      background: showWallGrid ? '#38bdf8' : 'rgba(255, 255, 255, 0.08)',
+                      border: 'none',
+                      color: showWallGrid ? '#040d1a' : '#94a3b8',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    {showWallGrid ? 'ACTIVADA' : 'OCULTA'}
+                  </button>
+                </div>
+
+                {/* 1. Modo de Colocación (Pared vs Repisa) */}
                 <div
                   style={{
                     background: 'rgba(255, 255, 255, 0.03)',
@@ -2638,7 +2723,7 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
               </div>
             )}
 
-            {/* TAB 3: REFLECTION & WEATHER LIGHTING */}
+            {/* TAB 3: REFLECTION & WEATHER LIGHTING (SIMPLIFIED & CLEAN) */}
             {activeTab === 'lighting' && (
               <div
                 style={{
@@ -2696,7 +2781,32 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                   </div>
                 </div>
 
-                {/* 2. Tonalidad & Clima del Mockup */}
+                {/* 2. Brillo de Reflejo */}
+                <div
+                  style={{
+                    background: 'rgba(255, 255, 255, 0.03)',
+                    padding: '12px 14px',
+                    borderRadius: '12px',
+                    border: '1px solid rgba(255, 255, 255, 0.08)',
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#ffffff', marginBottom: '4px' }}>
+                    <span style={{ fontWeight: 600 }}>☀️ Brillo de Reflejo</span>
+                    <span style={{ fontWeight: 700, color: 'var(--accent-primary)' }}>
+                      {Math.round(reflectionIntensity * 100)}%
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0.0"
+                    max="1.0"
+                    step="0.02"
+                    value={reflectionIntensity}
+                    onChange={(e) => setReflectionIntensity(parseFloat(e.target.value))}
+                  />
+                </div>
+
+                {/* 3. Tonalidad & Clima del Mockup */}
                 <div
                   style={{
                     background: 'rgba(255, 255, 255, 0.03)',
@@ -2708,7 +2818,7 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
                     <CloudSun size={13} color="var(--accent-primary)" />
                     <span style={{ fontSize: '11px', fontWeight: 600, color: '#ffffff' }}>
-                      Tonalidad & Clima del Mockup
+                      🌤️ Tonalidad & Clima del Mockup
                     </span>
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '3px' }}>
@@ -2746,186 +2856,10 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                     })}
                   </div>
                 </div>
-
-                {/* 3. Rotación 360° del Ventanal */}
-                <div
-                  style={{
-                    background: 'rgba(255, 255, 255, 0.03)',
-                    padding: '12px 14px',
-                    borderRadius: '12px',
-                    border: '1px solid rgba(255, 255, 255, 0.08)',
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                    <span style={{ fontSize: '11px', fontWeight: 600, color: '#ffffff' }}>
-                      🔄 Ángulo del Ventanal (360°)
-                    </span>
-                    <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--accent-primary)' }}>
-                      {reflectionAngleDeg}º
-                    </span>
-                  </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '4px', marginBottom: '8px' }}>
-                    {[
-                      { name: 'Frontal', angle: 0 },
-                      { name: 'Lat. Der', angle: 90 },
-                      { name: 'Opuesto', angle: 180 },
-                      { name: 'Lat. Izq', angle: 270 },
-                    ].map((p) => {
-                      const isSel = Math.abs(reflectionAngleDeg - p.angle) < 5;
-                      return (
-                        <button
-                          key={p.name}
-                          onClick={() => setReflectionAngleDeg(p.angle)}
-                          style={{
-                            padding: '5px 2px',
-                            borderRadius: '6px',
-                            fontSize: '9.5px',
-                            fontWeight: 600,
-                            border: isSel ? '1px solid var(--accent-primary)' : '1px solid rgba(255,255,255,0.06)',
-                            background: isSel ? 'var(--accent-primary-subtle)' : 'rgba(255,255,255,0.03)',
-                            color: isSel ? '#ffffff' : '#94a3b8',
-                            cursor: 'pointer',
-                          }}
-                        >
-                          {p.name}
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <input
-                    type="range"
-                    min="0"
-                    max="360"
-                    step="2"
-                    value={reflectionAngleDeg}
-                    onChange={(e) => setReflectionAngleDeg(parseInt(e.target.value))}
-                  />
-                </div>
-
-                {/* 4. Sliders de Brillo, Contraste, Escala & Nitidez */}
-                <div
-                  style={{
-                    background: 'rgba(255, 255, 255, 0.03)',
-                    padding: '12px 14px',
-                    borderRadius: '12px',
-                    border: '1px solid rgba(255, 255, 255, 0.08)',
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#ffffff', marginBottom: '2px' }}>
-                    <span style={{ fontWeight: 600 }}>💎 Brillo de Reflejo</span>
-                    <span style={{ fontWeight: 700, color: 'var(--accent-primary)' }}>
-                      {Math.round(reflectionIntensity * 100)}%
-                    </span>
-                  </div>
-                  <input
-                    type="range"
-                    min="0.0"
-                    max="1.0"
-                    step="0.02"
-                    value={reflectionIntensity}
-                    onChange={(e) => setReflectionIntensity(parseFloat(e.target.value))}
-                    style={{ marginBottom: '10px' }}
-                  />
-
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#ffffff', marginBottom: '2px' }}>
-                    <span style={{ fontWeight: 600 }}>🌓 Contraste de Reflejo</span>
-                    <span style={{ fontWeight: 700, color: 'var(--accent-primary)' }}>{reflectionBrightness}</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="-50"
-                    max="50"
-                    step="1"
-                    value={reflectionBrightness}
-                    onChange={(e) => setReflectionBrightness(parseInt(e.target.value))}
-                    style={{ marginBottom: '10px' }}
-                  />
-
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#ffffff', marginBottom: '2px' }}>
-                    <span style={{ fontWeight: 600 }}>🔍 Cobertura / Escala del Ventanal</span>
-                    <span style={{ fontWeight: 700, color: 'var(--accent-primary)' }}>
-                      {Math.round(reflectionScale * 100)}%
-                    </span>
-                  </div>
-                  <input
-                    type="range"
-                    min="0.5"
-                    max="2.0"
-                    step="0.05"
-                    value={reflectionScale}
-                    onChange={(e) => setReflectionScale(parseFloat(e.target.value))}
-                    style={{ marginBottom: '10px' }}
-                  />
-
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#ffffff', marginBottom: '2px' }}>
-                    <span style={{ fontWeight: 600 }}>✨ Nitidez / Rugosidad del Cristal</span>
-                    <span style={{ fontWeight: 700, color: 'var(--accent-primary)' }}>
-                      {reflectionRoughness <= 0.04
-                        ? 'Cristal Ultra Nítido'
-                        : reflectionRoughness <= 0.1
-                        ? 'Vidrio / Resina'
-                        : reflectionRoughness <= 0.18
-                        ? 'Semibrillo'
-                        : 'Satinado'}
-                    </span>
-                  </div>
-                  <input
-                    type="range"
-                    min="0.02"
-                    max="0.25"
-                    step="0.01"
-                    value={reflectionRoughness}
-                    onChange={(e) => setReflectionRoughness(parseFloat(e.target.value))}
-                  />
-                </div>
-
-                {/* 5. Firmas de Reflejo Escénico */}
-                <div
-                  style={{
-                    background: 'rgba(255, 255, 255, 0.03)',
-                    padding: '12px 14px',
-                    borderRadius: '12px',
-                    border: '1px solid rgba(255, 255, 255, 0.08)',
-                  }}
-                >
-                  <span style={{ fontSize: '11px', fontWeight: 600, color: '#ffffff', display: 'block', marginBottom: '8px' }}>
-                    🏛️ Firmas de Reflejo Escénico Publicitario
-                  </span>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '6px' }}>
-                    {REFLECTION_OPTIONS.map((ref) => {
-                      const isSel = reflectionType === ref.id;
-                      return (
-                        <button
-                          key={ref.id}
-                          onClick={() => setReflectionType(ref.id)}
-                          style={{
-                            padding: '8px 10px',
-                            borderRadius: '8px',
-                            fontSize: '11px',
-                            fontWeight: 600,
-                            border: isSel ? '1.5px solid var(--accent-primary)' : '1px solid rgba(255,255,255,0.06)',
-                            background: isSel ? 'rgba(222, 35, 103, 0.18)' : 'rgba(255,255,255,0.03)',
-                            color: isSel ? '#ffffff' : '#94a3b8',
-                            cursor: 'pointer',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '6px',
-                            textAlign: 'left',
-                          }}
-                        >
-                          <span style={{ fontSize: '14px' }}>{ref.icon}</span>
-                          <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                            {ref.name}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
               </div>
             )}
 
-            {/* TAB 4: SHADOWS (AUTO-SYNCHRONIZED) */}
+            {/* TAB 4: SHADOWS (SIMPLIFIED & CLEAN) */}
             {activeTab === 'shadow' && (
               <div
                 style={{
@@ -2935,7 +2869,7 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                   border: '1px solid rgba(255, 255, 255, 0.08)',
                   display: 'flex',
                   flexDirection: 'column',
-                  gap: '10px',
+                  gap: '12px',
                   maxHeight: '440px',
                   overflowY: 'auto',
                 }}
@@ -2989,7 +2923,7 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                 </div>
 
                 {shadowPreset !== 'none' && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                     {/* 1. Intensidad de Sombra (0% a 100%) */}
                     <div>
                       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '3px' }}>
@@ -3024,27 +2958,12 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                       />
                     </div>
 
-                    {/* 3. Proyección / Distancia (0 a 100) */}
+                    {/* 3. Sombra de Contacto (si está en repisa o personalizada) */}
                     <div>
                       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '3px' }}>
-                        <span style={{ fontSize: '11px', color: '#ffffff' }}>Proyección / Distancia</span>
-                        <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--accent-primary)' }}>
-                          {shadowDistance}
+                        <span style={{ fontSize: '11px', color: '#ffffff' }}>
+                          {placementMode === 'shelf' ? '🪵 Sombra de Contacto en Repisa' : 'Sombra de Contacto'}
                         </span>
-                      </div>
-                      <input
-                        type="range"
-                        min="0"
-                        max="100"
-                        value={shadowDistance}
-                        onChange={(e) => setShadowDistance(parseInt(e.target.value))}
-                      />
-                    </div>
-
-                    {/* 4. Sombra de Contacto en Repisa (0% a 100%) */}
-                    <div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '3px' }}>
-                        <span style={{ fontSize: '11px', color: '#ffffff' }}>Sombra de Contacto en Repisa</span>
                         <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--accent-primary)' }}>
                           {shadowContactOcclusion}%
                         </span>
@@ -3055,41 +2974,6 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                         max="100"
                         value={shadowContactOcclusion}
                         onChange={(e) => setShadowContactOcclusion(parseInt(e.target.value))}
-                      />
-                    </div>
-
-                    {/* 5. Ángulo de Luz / Sombra (0° a 360°) */}
-                    <div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '3px' }}>
-                        <span style={{ fontSize: '11px', color: '#ffffff' }}>Ángulo de Luz / Sombra</span>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--accent-primary)' }}>
-                            {Math.round(shadowAngleDeg)}º
-                          </span>
-                          <button
-                            onClick={() => setShadowAngleDeg(Math.round((90 + reflectionAngleDeg * 0.5) % 360))}
-                            title="Sincronizar automáticamente con el ventanal"
-                            style={{
-                              background: 'rgba(255,255,255,0.06)',
-                              border: '1px solid rgba(255,255,255,0.1)',
-                              color: 'var(--accent-primary)',
-                              padding: '2px 6px',
-                              borderRadius: '4px',
-                              fontSize: '9px',
-                              cursor: 'pointer',
-                              fontWeight: 700,
-                            }}
-                          >
-                            ⚡ Auto
-                          </button>
-                        </div>
-                      </div>
-                      <input
-                        type="range"
-                        min="0"
-                        max="360"
-                        value={shadowAngleDeg}
-                        onChange={(e) => setShadowAngleDeg(parseInt(e.target.value))}
                       />
                     </div>
                   </div>

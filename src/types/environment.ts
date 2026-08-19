@@ -36,6 +36,9 @@ export interface MockupPosition {
   id: string;
   name: string;
   quad: PerspectiveQuad;
+  centerX?: number;
+  centerY?: number;
+  scaleWidth?: number;
   shadowIntensity?: number;
   shadowBlur?: number;
   shadowOffsetX?: number;

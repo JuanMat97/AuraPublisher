@@ -33,24 +33,24 @@ export function getNeutralSurfaceSettings(
 
   if (strength === 0) {
     return {
-      roughness: 1,
-      clearcoat: 0,
-      clearcoatRoughness: 1,
-      envMapIntensity: 0,
-      specularIntensity: 0,
-      iridescence: 0,
-      iridescenceIOR: 1.3,
+      roughness: vinyl.roughness ?? 0.10,
+      clearcoat: vinyl.clearcoat ?? 0.88,
+      clearcoatRoughness: vinyl.clearcoatRoughness ?? 0.03,
+      envMapIntensity: (vinyl.envMapIntensity ?? 2.2) * reflectionIntensity,
+      specularIntensity: (vinyl.specularIntensity ?? 1.9) * reflectionIntensity,
+      iridescence: vinyl.iridescence ?? 0,
+      iridescenceIOR: vinyl.iridescenceIOR ?? 1.3,
     };
   }
 
   // Resin is intentionally colourless. Do not apply the vinyl's iridescence
   // here: the real tornasolado workflow will use its own production mask.
   return {
-    roughness: RESIN_OVERLAY.roughness ?? 0.012,
+    roughness: RESIN_OVERLAY.roughness ?? 0.005,
     clearcoat: (RESIN_OVERLAY.clearcoat ?? 1.0) * strength,
-    clearcoatRoughness: 0.14 + (1 - strength) * 0.18,
-    envMapIntensity: (RESIN_OVERLAY.envMapIntensity ?? 4.5) * strength,
-    specularIntensity: (vinyl.specularIntensity ?? 1.4) * strength,
+    clearcoatRoughness: RESIN_OVERLAY.clearcoatRoughness ?? 0.005,
+    envMapIntensity: (RESIN_OVERLAY.envMapIntensity ?? 5.0) * strength,
+    specularIntensity: (RESIN_OVERLAY.specularIntensity ?? 2.6) * strength,
     iridescence: 0,
     iridescenceIOR: 1.3,
   };
@@ -225,13 +225,88 @@ export function createWrappedEdgeTextures(
   const horizStripPx = Math.max(4, Math.min(Math.floor(W * 0.45), Math.round((W * clampedThick) / Math.max(panelWidthCm, 1))));
   const vertStripPx = Math.max(4, Math.min(Math.floor(H * 0.45), Math.round((H * clampedThick) / Math.max(panelHeightCm, 1))));
 
-  const mk = (sx: number, sy: number, sw: number, sh: number, dw: number, dh: number) => {
+  const mk = (
+    sx: number,
+    sy: number,
+    sw: number,
+    sh: number,
+    dw: number,
+    dh: number,
+    isVerticalEdge: boolean
+  ) => {
     const c = document.createElement('canvas');
     c.width = dw;
     c.height = dh;
     const ctx = c.getContext('2d');
     if (ctx) {
       ctx.drawImage(sourceCanvas, sx, sy, sw, sh, 0, 0, dw, dh);
+
+      // Ambient Occlusion crease / inner bevel gradients for physical depth & corner folds
+      ctx.save();
+      if (!isVerticalEdge) {
+        // Left & Right side faces: dw is thickness (front-to-back), dh is 256 (height)
+        const bevelSize = Math.max(2, Math.min(Math.round(dw * 0.35), 14));
+
+        // Front border dark gradient (crease / inner bevel)
+        const frontGrad = ctx.createLinearGradient(0, 0, bevelSize, 0);
+        frontGrad.addColorStop(0, 'rgba(0, 0, 0, 0.55)');
+        frontGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        ctx.fillStyle = frontGrad;
+        ctx.fillRect(0, 0, bevelSize, dh);
+
+        // Rear border dark gradient (ambient contact occlusion)
+        const rearGrad = ctx.createLinearGradient(dw, 0, dw - bevelSize, 0);
+        rearGrad.addColorStop(0, 'rgba(0, 0, 0, 0.55)');
+        rearGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        ctx.fillStyle = rearGrad;
+        ctx.fillRect(dw - bevelSize, 0, bevelSize, dh);
+
+        // Corner folds on top and bottom limits
+        const cornerH = Math.min(14, Math.round(dh * 0.06));
+        const topFold = ctx.createLinearGradient(0, 0, 0, cornerH);
+        topFold.addColorStop(0, 'rgba(0, 0, 0, 0.45)');
+        topFold.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        ctx.fillStyle = topFold;
+        ctx.fillRect(0, 0, dw, cornerH);
+
+        const botFold = ctx.createLinearGradient(0, dh, 0, dh - cornerH);
+        botFold.addColorStop(0, 'rgba(0, 0, 0, 0.45)');
+        botFold.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        ctx.fillStyle = botFold;
+        ctx.fillRect(0, dh - cornerH, dw, cornerH);
+      } else {
+        // Top & Bottom edges: dw is 256 (width), dh is thickness (front-to-back)
+        const bevelSize = Math.max(2, Math.min(Math.round(dh * 0.35), 14));
+
+        // Front border dark gradient
+        const frontGrad = ctx.createLinearGradient(0, 0, 0, bevelSize);
+        frontGrad.addColorStop(0, 'rgba(0, 0, 0, 0.55)');
+        frontGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        ctx.fillStyle = frontGrad;
+        ctx.fillRect(0, 0, dw, bevelSize);
+
+        // Rear border dark gradient
+        const rearGrad = ctx.createLinearGradient(0, dh, 0, dh - bevelSize);
+        rearGrad.addColorStop(0, 'rgba(0, 0, 0, 0.55)');
+        rearGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        ctx.fillStyle = rearGrad;
+        ctx.fillRect(0, dh - bevelSize, dw, bevelSize);
+
+        // Corner folds on left and right limits
+        const cornerW = Math.min(14, Math.round(dw * 0.06));
+        const leftFold = ctx.createLinearGradient(0, 0, cornerW, 0);
+        leftFold.addColorStop(0, 'rgba(0, 0, 0, 0.45)');
+        leftFold.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        ctx.fillStyle = leftFold;
+        ctx.fillRect(0, 0, cornerW, dh);
+
+        const rightFold = ctx.createLinearGradient(dw, 0, dw - cornerW, 0);
+        rightFold.addColorStop(0, 'rgba(0, 0, 0, 0.45)');
+        rightFold.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        ctx.fillStyle = rightFold;
+        ctx.fillRect(dw - cornerW, 0, cornerW, dh);
+      }
+      ctx.restore();
     }
     const tex = new THREE.CanvasTexture(c);
     tex.colorSpace = THREE.SRGBColorSpace;
@@ -251,10 +326,10 @@ export function createWrappedEdgeTextures(
   // 2: +Y (Top edge)
   // 3: -Y (Bottom edge)
   return [
-    mk(W - horizStripPx, 0, horizStripPx, H, horizStripPx, 256), // Right
-    mk(0, 0, horizStripPx, H, horizStripPx, 256),                // Left
-    mk(0, 0, W, vertStripPx, 256, vertStripPx),                // Top
-    mk(0, H - vertStripPx, W, vertStripPx, 256, vertStripPx),  // Bottom
+    mk(W - horizStripPx, 0, horizStripPx, H, horizStripPx, 256, false), // Right
+    mk(0, 0, horizStripPx, H, horizStripPx, 256, false),                // Left
+    mk(0, 0, W, vertStripPx, 256, vertStripPx, true),                 // Top
+    mk(0, H - vertStripPx, W, vertStripPx, 256, vertStripPx, true),   // Bottom
   ];
 }
 
@@ -276,13 +351,9 @@ export interface FrameShadowOptions {
 }
 
 /**
- * High-Definition Physically Anchored Frame Drop Shadow Generator.
- * Multi-Layer Architecture:
- * - Layer 1: Ambient Contact Occlusion (tighter & crisper close to wall, razor sharp at blur 0)
- * - Layer 2: Soft Perimeter Shadow
- * - Layer 3: Directional Wall Cast Drop Shadow with dramatic projection (up to 120px offset)
- *            and pitch perspective deformation up to +-75 degrees.
- * - Layer 4: Shelf Contact Ambient Occlusion (Supporting bottom edge crease & pool)
+ * Clean Single Physical Drop Shadow Generator.
+ * Calculates a single continuous perspective-projected soft shadow directly
+ * from the light vector on the wall plane, eliminating multi-layer overlapping box artifacts.
  */
 export function drawExactFrameShadowToContext(
   ctx: CanvasRenderingContext2D,
@@ -321,15 +392,14 @@ export function drawExactFrameShadowToContext(
   const pitchRad = (clampedPitch * Math.PI) / 180;
   const pitchTiltFactor = Math.abs(clampedPitch) / 75;
 
-  // Full dynamic range intensity: 100% gives deep dramatic contrast
+  // Dynamic range intensity: normalized to [0..1]
   const normIntensity = Math.max(0.0, Math.min(1.0, intensity / 100));
-  const baseAlpha = normIntensity;
-  const alpha = Math.min(1.0, baseAlpha * distanceAlphaMult);
+  const alpha = Math.min(1.0, normIntensity * distanceAlphaMult * 0.85);
 
   // Blur covers 0px (razor sharp crisp line) to 120px (ultra-soft diffuse cloud) based on blur parameter (0..100)
   const normBlur = Math.max(0.0, Math.min(1.0, blur / 100));
   const tiltBlurAdd = normBlur > 0 ? pitchTiltFactor * 16 * normBlur : 0;
-  const blurPx = normBlur === 0 ? 0 : Math.max(0, (normBlur * 120 + tiltBlurAdd) * distanceBlurMult);
+  const blurPx = normBlur === 0 ? 0 : Math.max(0, (normBlur * 90 + tiltBlurAdd) * distanceBlurMult);
 
   const getBlurFilter = (px: number) => {
     const rounded = Math.round(px * 10) / 10;
@@ -353,14 +423,14 @@ export function drawExactFrameShadowToContext(
   const bottomScale = Math.max(0.2, 1.0 - taperFactor);
   const projH = frameH * pitchCos;
 
-  // Directional dramatic projection offset (up to 120px offset when distance or pitch is high)
+  // Directional projection offset calculated from light vector / angleDeg
   const rad = (angleDeg * Math.PI) / 180;
   const normDistance = Math.max(0.0, Math.min(1.0, distance / 100));
-  const baseDistPx = normDistance * 100 * distanceOffsetMult;
+  const baseDistPx = normDistance * 90 * distanceOffsetMult;
 
   const wallRad = ((wallAngleDeg || 0) * Math.PI) / 180;
-  const wallOffsetPx = Math.sin(wallRad) * 35;
-  const pitchOffsetPx = Math.sin(pitchRad) * 45;
+  const wallOffsetPx = Math.sin(wallRad) * 32;
+  const pitchOffsetPx = Math.sin(pitchRad) * 40;
 
   let dropX = -Math.cos(rad) * baseDistPx + wallOffsetPx;
   let dropY = Math.sin(rad) * baseDistPx + pitchOffsetPx;
@@ -406,42 +476,10 @@ export function drawExactFrameShadowToContext(
     c.fill();
   };
 
-  // 1. LAYER 1: Ambient Contact Occlusion (tighter & crisper close to wall, razor sharp at blur 0)
-  if (zFactor < 5) {
-    ctx.save();
-    const contactBlur = normBlur === 0 ? 0 : Math.max(1, (normBlur * 12 + zFactor * 3));
-    const contactAlpha = Math.min(1.0, alpha * Math.max(0.2, 0.95 - zFactor * 0.12));
-    ctx.filter = getBlurFilter(contactBlur);
-    ctx.fillStyle = `rgba(0, 0, 0, ${contactAlpha})`;
-    drawQuad(
-      ctx,
-      tl_x - dropX, tl_y - dropY,
-      tr_x - dropX, tr_y - dropY,
-      br_x - dropX, br_y - dropY,
-      bl_x - dropX, bl_y - dropY
-    );
-    ctx.restore();
-  }
-
-  // 2. LAYER 2: Soft Perimeter Shadow (Razor sharp at blur 0, scaling up with blur)
-  ctx.save();
-  const perimBlur = normBlur === 0 ? 0 : Math.max(2, normBlur * 24 * distanceBlurMult);
-  ctx.filter = getBlurFilter(perimBlur);
-  ctx.fillStyle = `rgba(0, 0, 0, ${Math.min(1.0, alpha * 0.65)})`;
-  const perimPad = normBlur === 0 ? 1 : 4;
-  drawQuad(
-    ctx,
-    tl_x - dropX - perimPad, tl_y - dropY - perimPad,
-    tr_x - dropX + perimPad, tr_y - dropY - perimPad,
-    br_x - dropX + perimPad, br_y - dropY + perimPad,
-    bl_x - dropX - perimPad, bl_y - dropY + perimPad
-  );
-  ctx.restore();
-
-  // 3. LAYER 3: Directional Wall Cast Drop Shadow with dramatic projection & perspective
+  // SINGLE clean, continuous, perspective-projected soft shadow directly on the wall plane
   ctx.save();
   ctx.filter = getBlurFilter(blurPx);
-  ctx.fillStyle = `rgba(0, 0, 0, ${Math.min(1.0, alpha * 0.95)})`;
+  ctx.fillStyle = `rgba(0, 0, 0, ${alpha})`;
 
   if (shadowPreset === 'parallel') {
     drawQuad(ctx, tl_x, tl_y, tr_x, tr_y, br_x, br_y, bl_x, bl_y);
@@ -456,7 +494,7 @@ export function drawExactFrameShadowToContext(
     );
   } else if (shadowPreset === 'outline') {
     ctx.lineWidth = 12 + normDistance * 24;
-    ctx.strokeStyle = `rgba(0, 0, 0, ${Math.min(1.0, alpha * 0.95)})`;
+    ctx.strokeStyle = `rgba(0, 0, 0, ${alpha})`;
     ctx.beginPath();
     ctx.moveTo(tl_x, tl_y);
     ctx.lineTo(tr_x, tr_y);
@@ -483,7 +521,7 @@ export function drawExactFrameShadowToContext(
       centerX + dropX, floatCenterY, 6,
       centerX + dropX, floatCenterY, frameW * 0.75 * Math.max(0.6, bottomScale)
     );
-    floatGrad.addColorStop(0, `rgba(0, 0, 0, ${Math.min(1.0, alpha * 0.95)})`);
+    floatGrad.addColorStop(0, `rgba(0, 0, 0, ${alpha})`);
     floatGrad.addColorStop(0.5, `rgba(0, 0, 0, ${alpha * 0.45})`);
     floatGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
     ctx.fillStyle = floatGrad;
@@ -509,41 +547,20 @@ export function drawExactFrameShadowToContext(
       br_x, br_y,
       bl_x, bl_y
     );
+  } else {
+    // Default perspective quad
+    drawQuad(ctx, tl_x, tl_y, tr_x, tr_y, br_x, br_y, bl_x, bl_y);
   }
 
   ctx.restore();
 
-  // 4. LAYER 4: Shelf Contact Ambient Occlusion (Darker & crisper on bottom/supporting edge)
+  // Shelf contact shadow: tight 2px contact line along the bottom edge
   if (shelfContactShadow) {
     ctx.save();
-    // 4a. Ultra-crisp contact crease along bottom shelf edge
-    ctx.filter = getBlurFilter(normBlur === 0 ? 0 : 2);
-    ctx.fillStyle = `rgba(0, 0, 0, ${Math.min(1.0, alpha * 1.8)})`;
-    ctx.fillRect(bl_x - frameW * 0.01, br_y - 1, Math.max(10, (br_x - bl_x) * 1.02), 3);
-
-    // 4b. Immediate shelf downward contact gradient
-    ctx.filter = getBlurFilter(normBlur === 0 ? 0 : 5);
-    const shelfGrad = ctx.createLinearGradient(centerX, br_y - 2, centerX, br_y + 28);
-    shelfGrad.addColorStop(0, `rgba(0, 0, 0, ${Math.min(1.0, alpha * 1.4)})`);
-    shelfGrad.addColorStop(0.35, `rgba(0, 0, 0, ${Math.min(1.0, alpha * 0.75)})`);
-    shelfGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
-    ctx.fillStyle = shelfGrad;
-    ctx.fillRect(bl_x - frameW * 0.04, br_y - 2, Math.max(10, (br_x - bl_x) * 1.08), 30);
-
-    // 4c. Soft shelf ambient occlusion pool
-    ctx.filter = getBlurFilter(normBlur === 0 ? 0 : 10);
-    const shelfSpread = ctx.createRadialGradient(
-      centerX,
-      br_y + 4,
-      8,
-      centerX,
-      br_y + 4,
-      frameW * 0.6
-    );
-    shelfSpread.addColorStop(0, `rgba(0, 0, 0, ${Math.min(1.0, alpha * 0.65)})`);
-    shelfSpread.addColorStop(1, 'rgba(0, 0, 0, 0)');
-    ctx.fillStyle = shelfSpread;
-    ctx.fillRect(bl_x - frameW * 0.08, br_y - 4, Math.max(10, (br_x - bl_x) * 1.16), 36);
+    ctx.filter = 'none';
+    ctx.fillStyle = `rgba(0, 0, 0, ${Math.min(0.85, alpha * 1.2)})`;
+    const bottomW = Math.max(10, br_x - bl_x);
+    ctx.fillRect(bl_x, br_y - 1, bottomW, 2);
     ctx.restore();
   }
 }
@@ -1132,21 +1149,22 @@ export function renderWebGLRoomComposite(options: RenderWebGLRoomOptions): HTMLC
   let iridescenceIOR = 1.3;
   let emissiveBoost = 1.0;
 
-  if (hasResina || finishType === 'epoxy_resina') {
+  if (hasResina || finishType === 'epoxy_resina' || finishType === 'resina') {
     // Resina Epoxi: high-definition mirror highlight centered at lightSource3D vector
-    roughness = 0.008;
-    clearcoat = 1.0;
-    clearcoatRoughness = reflectionRoughness ?? 0.008;
-    envMapIntensity = 4.8;
-    specularIntensity = 2.4;
+    roughness = RESIN_OVERLAY.roughness ?? 0.005;
+    clearcoat = RESIN_OVERLAY.clearcoat ?? 1.0;
+    clearcoatRoughness = reflectionRoughness ?? (RESIN_OVERLAY.clearcoatRoughness ?? 0.005);
+    envMapIntensity = RESIN_OVERLAY.envMapIntensity ?? 5.0;
+    specularIntensity = RESIN_OVERLAY.specularIntensity ?? 2.6;
     emissiveBoost = RESIN_OVERLAY.colorBoost ?? 1.06;
   } else if (finishType === 'mate') {
-    // Vinilo Mate: subtle diffuse specular sheen (roughness 0.88, specularIntensity 0.35, clearcoat 0.05)
-    roughness = 0.88;
-    clearcoat = 0.05;
-    clearcoatRoughness = reflectionRoughness ?? 0.85;
-    envMapIntensity = 0.25;
-    specularIntensity = 0.35;
+    // Vinilo Mate -> Satinado look: roughness: 0.45, clearcoat: 0.28, clearcoatRoughness: 0.18, envMapIntensity: 0.85, specularIntensity: 0.85
+    const p = finishPresets.mate;
+    roughness = p.roughness ?? 0.45;
+    clearcoat = p.clearcoat ?? 0.28;
+    clearcoatRoughness = reflectionRoughness ?? (p.clearcoatRoughness ?? 0.18);
+    envMapIntensity = p.envMapIntensity ?? 0.85;
+    specularIntensity = p.specularIntensity ?? 0.85;
     emissiveBoost = 1.0;
   } else if (finishType === 'tornasolado') {
     const p = finishPresets.tornasolado;
@@ -1158,13 +1176,13 @@ export function renderWebGLRoomComposite(options: RenderWebGLRoomOptions): HTMLC
     iridescence = p.iridescence ?? 1.0;
     iridescenceIOR = p.iridescenceIOR ?? 1.45;
   } else {
-    // Vinilo Brillante / Satinado: smooth specular gradient aligned with lightSource3D vector
+    // Vinilo Brillante nítido: roughness: 0.10, clearcoat: 0.88, clearcoatRoughness: 0.03, envMapIntensity: 2.2, specularIntensity: 1.9
     const p = finishPresets[finishType] || finishPresets.brillante;
-    roughness = p.roughness ?? 0.20;
-    clearcoat = p.clearcoat ?? 0.65;
-    clearcoatRoughness = reflectionRoughness ?? (p.clearcoatRoughness ?? 0.08);
-    envMapIntensity = p.envMapIntensity ?? 1.8;
-    specularIntensity = p.specularIntensity ?? 1.4;
+    roughness = p.roughness ?? 0.10;
+    clearcoat = p.clearcoat ?? 0.88;
+    clearcoatRoughness = reflectionRoughness ?? (p.clearcoatRoughness ?? 0.03);
+    envMapIntensity = p.envMapIntensity ?? 2.2;
+    specularIntensity = p.specularIntensity ?? 1.9;
   }
 
   const ior = 1.50;
@@ -1310,7 +1328,7 @@ export function renderWebGLRoomComposite(options: RenderWebGLRoomOptions): HTMLC
     depthWrite: false,
   });
   const shadowMesh = new THREE.Mesh(shadowGeom, shadowMat);
-  shadowMesh.position.set(normX, normY, 0.003);
+  shadowMesh.position.set(normX, normY, 0.001);
   shadowMesh.rotation.x = 0;
   shadowMesh.rotation.y = group.rotation.y;
   shadowMesh.rotation.z = group.rotation.z;

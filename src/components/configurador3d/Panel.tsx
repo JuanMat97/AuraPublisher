@@ -170,14 +170,14 @@ export function Panel({
     const mat = new THREE.MeshPhysicalMaterial({
       map: activeTex,
       color: new THREE.Color(p.colorBoost ?? 1, p.colorBoost ?? 1, p.colorBoost ?? 1),
-      roughness: 0.08,
-      clearcoat: 1.0,
-      clearcoatRoughness: 0.08,
-      iridescence: p.iridescence ?? 0.35,
+      roughness: p.roughness ?? 0.10,
+      clearcoat: p.clearcoat ?? 0.88,
+      clearcoatRoughness: p.clearcoatRoughness ?? 0.03,
+      iridescence: p.iridescence ?? 0,
       iridescenceIOR: p.iridescenceIOR ?? 1.3,
       iridescenceMap: finish === 'tornasolado' ? mask : null,
-      envMapIntensity: 1.6,
-      specularIntensity: 1.4,
+      envMapIntensity: p.envMapIntensity ?? 2.2,
+      specularIntensity: p.specularIntensity ?? 1.9,
     });
     mat.needsUpdate = true;
     return mat;
