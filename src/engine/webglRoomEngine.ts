@@ -732,7 +732,8 @@ export function renderWebGLRoomComposite(options: RenderWebGLRoomOptions): HTMLC
   renderer.setSize(renderWidth, renderHeight);
   renderer.setPixelRatio(1);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
-  renderer.toneMapping = THREE.NoToneMapping; // Zero-Loss Original Color Fidelity
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.05;
 
   const maxAniso = renderer.capabilities.getMaxAnisotropy ? renderer.capabilities.getMaxAnisotropy() : 16;
 
@@ -783,7 +784,10 @@ export function renderWebGLRoomComposite(options: RenderWebGLRoomOptions): HTMLC
   fillLight.position.set(-4, 3, -3);
   scene.add(fillLight);
 
-  // 3. Environment Map (Specular Reflections)
+  // 3. Environment Map (PMREM Prefiltered Specular Reflections)
+  const pmremGenerator = new THREE.PMREMGenerator(renderer);
+  pmremGenerator.compileEquirectangularShader();
+
   const envTex = generateRaytracingEquirectangularMap({
     reflectionType,
     angleDeg: reflectionAngleDeg,
@@ -791,7 +795,9 @@ export function renderWebGLRoomComposite(options: RenderWebGLRoomOptions): HTMLC
     scale: reflectionScale,
     lightMode,
   });
-  scene.environment = envTex;
+  const envRenderTarget = pmremGenerator.fromEquirectangular(envTex);
+  envTex.dispose();
+  scene.environment = envRenderTarget.texture;
 
   // 4. Artwork Texture with Zero-Loss Original Color Fidelity
   const gradedCanvas = applyCanvaAdjustmentsToCanvas(artworkImage, adjust);
@@ -825,54 +831,36 @@ export function renderWebGLRoomComposite(options: RenderWebGLRoomOptions): HTMLC
   const depthM = 0.009; // Slim 9mm profile (no chunky box)
 
   const preset = finishPresets[finishType] || finishPresets.brillante;
+  const p = hasResina ? { ...preset, ...RESIN_OVERLAY } : preset;
+  const emissiveBoost = p.colorBoost ?? 1.0;
 
-  // Material PBR Properties configuration based on finishType & hasResina
-  let roughness = preset?.roughness ?? 0.15;
-  let clearcoat = preset?.clearcoat ?? 0.6;
-  let clearcoatRoughness = reflectionRoughness ?? preset?.clearcoatRoughness ?? 0.012;
-  let envMapIntensity = preset?.envMapIntensity ?? 0.8;
-  let ior = 1.50;
-  let iridescence = preset?.iridescence ?? 0;
-  let iridescenceIOR = preset?.iridescenceIOR ?? 1.3;
-  let emissiveBoost = preset?.colorBoost ?? 1.0;
-
-  if (finishType === 'mate') {
-    roughness = 0.92;
-    clearcoat = 0;
-    envMapIntensity = 0.1;
-    iridescence = 0;
-  } else if (finishType === 'tornasolado') {
-    iridescence = 1.0;
-    iridescenceIOR = 1.45;
-  }
-
-  if (hasResina) {
-    clearcoat = 1.0;
-    clearcoatRoughness = reflectionRoughness;
-    roughness = 0.012;
-    emissiveBoost = 1.06;
-    ior = 1.50;
-    envMapIntensity = 1.8;
-  }
+  const roughness = p.roughness;
+  const clearcoat = p.clearcoat;
+  const clearcoatRoughness = reflectionRoughness ?? p.clearcoatRoughness;
+  const envMapIntensity = p.envMapIntensity;
+  const ior = 1.50;
+  const iridescence = p.iridescence ?? 0;
+  const iridescenceIOR = p.iridescenceIOR ?? 1.3;
+  const specularIntensity = p.specularIntensity ?? (hasResina ? 2.2 : 1.4);
 
   // Subtle natural exposure & temperature blend for seamless room integration
-  const emissiveColor = neutralColor.clone().lerp(wallColor, wallHarmonization * 0.28).multiplyScalar(emissiveBoost);
-  const emissiveIntensity = 1.0 - (1.0 - wallSample.luminance) * wallHarmonization * 0.35;
+  const emissiveColor = neutralColor.clone().lerp(wallColor, wallHarmonization * 0.28);
+  const emissiveIntensity = 0.1 * (1.0 - (1.0 - wallSample.luminance) * wallHarmonization * 0.35);
 
   const frontMat = new THREE.MeshPhysicalMaterial({
-    color: 0x000000, // Black base
+    map: artTex,
+    color: new THREE.Color(emissiveBoost, emissiveBoost, emissiveBoost),
     emissive: emissiveColor,
     emissiveMap: artTex,
-    emissiveIntensity: emissiveIntensity, // 100% Exact 1:1 Original Color Fidelity
+    emissiveIntensity: emissiveIntensity,
     roughness: roughness,
     clearcoat: clearcoat,
     clearcoatRoughness: clearcoatRoughness,
     ior: ior,
-    envMap: envTex,
     envMapIntensity: envMapIntensity,
     iridescence: iridescence,
     iridescenceIOR: iridescenceIOR,
-    specularIntensity: preset.specularIntensity ?? (hasResina ? 1.4 : 1.0),
+    specularIntensity: specularIntensity,
   });
 
   const edgeMat = new THREE.MeshStandardMaterial({ color: 0x141416, roughness: 0.35, metalness: 0.1 });
@@ -891,6 +879,7 @@ export function renderWebGLRoomComposite(options: RenderWebGLRoomOptions): HTMLC
     }
 
     const pMat = frontMat.clone();
+    pMat.map = pTex;
     pMat.emissiveMap = pTex;
 
     const materials = [edgeMat, edgeMat, edgeMat, edgeMat, pMat, backMat];
@@ -926,6 +915,8 @@ export function renderWebGLRoomComposite(options: RenderWebGLRoomOptions): HTMLC
   scene.add(shadowMesh);
 
   renderer.render(scene, camera);
+  pmremGenerator.dispose();
+  envRenderTarget.dispose();
   renderer.dispose();
 
   return canvas;

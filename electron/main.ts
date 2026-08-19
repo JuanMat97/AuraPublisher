@@ -177,3 +177,34 @@ ipcMain.handle('file:saveBase64', async (_event, { base64Data, targetPath, quali
     return { success: false, error: err.message };
   }
 });
+
+// 7. Save binary buffer (e.g. XLSX workbook) to disk file
+ipcMain.handle('file:saveBuffer', async (_event, { buffer, targetPath }: { buffer: Uint8Array | number[] | ArrayBuffer; targetPath: string }) => {
+  try {
+    const dir = path.dirname(targetPath);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+
+    const nodeBuf = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer as any);
+    fs.writeFileSync(targetPath, nodeBuf);
+    return { success: true, path: targetPath };
+  } catch (err: any) {
+    console.error('Error saving buffer file:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+// 8. Read template binary file
+ipcMain.handle('file:readTemplate', async (_event, filePath: string) => {
+  try {
+    if (fs.existsSync(filePath)) {
+      const data = fs.readFileSync(filePath);
+      return { success: true, buffer: data };
+    }
+    return { success: false, error: 'Template file not found' };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+});
+

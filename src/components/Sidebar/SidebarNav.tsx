@@ -1,12 +1,13 @@
 import React from 'react';
 import { useAppStore, StudioView } from '../../store/appStore';
-import { LayoutGrid, FileText, BarChart2, Globe, Bookmark } from 'lucide-react';
+import { LayoutGrid, FileText, BarChart2, Globe, Bookmark, FileSpreadsheet } from 'lucide-react';
 
 export const SidebarNav: React.FC = () => {
   const { currentView, setCurrentView, presets } = useAppStore();
 
   const navItems: Array<{ id: StudioView; label: string; icon: React.ReactNode; badge?: string }> = [
     { id: 'studio', label: 'Studio Mockups', icon: <LayoutGrid size={18} /> },
+    { id: 'publish', label: 'Publicación ML', icon: <FileSpreadsheet size={18} />, badge: 'PASO 3' },
     { id: 'seo', label: 'Ficha & SEO ML', icon: <FileText size={18} />, badge: 'IA' },
     { id: 'infographics', label: 'Infografías ML', icon: <BarChart2 size={18} /> },
     { id: 'unsplash', label: 'Hub Unsplash', icon: <Globe size={18} /> },

@@ -22,7 +22,7 @@ import {
   sampleWallLighting,
   WallLightingSample,
 } from '../../engine/webglRoomEngine';
-import { finishPresets } from '../configurador3d/finishPresets';
+import { finishPresets, RESIN_OVERLAY } from '../configurador3d/finishPresets';
 import { X, Check, Move, Sliders, Sun, Layers, Palette, RotateCcw, Target } from 'lucide-react';
 
 interface CanvaMoldEditorModalProps {
@@ -103,6 +103,8 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
   // Persistent Three.js Scene References
   const threeState = useRef<{
     renderer: THREE.WebGLRenderer | null;
+    pmremGenerator: THREE.PMREMGenerator | null;
+    currentEnvRenderTarget: THREE.WebGLRenderTarget | null;
     scene: THREE.Scene | null;
     camera: THREE.PerspectiveCamera | null;
     artGroup: THREE.Group | null;
@@ -125,6 +127,8 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
     animId: number;
   }>({
     renderer: null,
+    pmremGenerator: null,
+    currentEnvRenderTarget: null,
     scene: null,
     camera: null,
     artGroup: null,
@@ -156,17 +160,38 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
     reflRough: number,
     wallHarm: number
   ) => {
-    const { scene, frontMaterials, ambLight, keyLight, fillLight } = threeState.current;
+    const { scene, frontMaterials, ambLight, keyLight, fillLight, pmremGenerator } = threeState.current;
     if (!scene) return;
 
-    const envTex = generateRaytracingEquirectangularMap({
-      reflectionType: reflType,
-      angleDeg: reflAngle,
-      intensity: reflInt,
-      scale: reflScale,
-      lightMode: lMode,
-    });
-    scene.environment = productConfig.hasResina ? envTex : null;
+    if (pmremGenerator) {
+      const envTex = generateRaytracingEquirectangularMap({
+        reflectionType: reflType,
+        angleDeg: reflAngle,
+        intensity: reflInt,
+        scale: reflScale,
+        lightMode: lMode,
+      });
+      if (threeState.current.currentEnvRenderTarget) {
+        threeState.current.currentEnvRenderTarget.dispose();
+      }
+      const envRenderTarget = pmremGenerator.fromEquirectangular(envTex);
+      envTex.dispose();
+      threeState.current.currentEnvRenderTarget = envRenderTarget;
+      scene.environment = envRenderTarget.texture;
+    }
+
+    const preset = finishPresets[productConfig.vinylFinish] || finishPresets.brillante;
+    const p = productConfig.hasResina ? { ...preset, ...RESIN_OVERLAY } : preset;
+    const emissiveBoost = p.colorBoost ?? 1.0;
+
+    const roughness = p.roughness;
+    const clearcoat = p.clearcoat;
+    const clearcoatRoughness = reflRough ?? p.clearcoatRoughness;
+    const envMapIntensity = p.envMapIntensity;
+    const ior = 1.50;
+    const iridescence = p.iridescence ?? 0;
+    const iridescenceIOR = p.iridescenceIOR ?? 1.3;
+    const specularIntensity = p.specularIntensity ?? (productConfig.hasResina ? 2.2 : 1.4);
 
     if (wallSample) {
       const neutralColor = new THREE.Color(0xffffff);
@@ -186,39 +211,12 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
         fillLight.intensity = 0.45 * roomLightScale;
       }
 
-      const preset = finishPresets[productConfig.vinylFinish] || finishPresets.brillante;
-      const emissiveBoost = productConfig.hasResina ? 1.06 : (preset?.colorBoost ?? 1.0);
-      const emissiveColor = neutralColor.clone().lerp(wallColor, wallHarm * 0.28).multiplyScalar(emissiveBoost);
-      const emissiveIntensity = 1.0 - (1.0 - wallSample.luminance) * wallHarm * 0.35;
-
-      let roughness = preset?.roughness ?? 0.15;
-      let clearcoat = preset?.clearcoat ?? 0.6;
-      let clearcoatRoughness = reflRough ?? preset?.clearcoatRoughness ?? 0.012;
-      let envMapIntensity = preset?.envMapIntensity ?? 0.8;
-      let ior = 1.50;
-      let iridescence = preset?.iridescence ?? 0;
-      let iridescenceIOR = preset?.iridescenceIOR ?? 1.3;
-
-      if (productConfig.vinylFinish === 'mate') {
-        roughness = 0.92;
-        clearcoat = 0;
-        envMapIntensity = 0.1;
-        iridescence = 0;
-      } else if (productConfig.vinylFinish === 'tornasolado') {
-        iridescence = 1.0;
-        iridescenceIOR = 1.45;
-      }
-
-      if (productConfig.hasResina) {
-        clearcoat = 1.0;
-        clearcoatRoughness = reflRough ?? 0.012;
-        roughness = 0.012;
-        ior = 1.50;
-        envMapIntensity = 1.8;
-      }
+      const subtleEmissiveColor = neutralColor.clone().lerp(wallColor, wallHarm * 0.28);
+      const emissiveIntensity = 0.1 * (1.0 - (1.0 - wallSample.luminance) * wallHarm * 0.35);
 
       frontMaterials.forEach((mat) => {
-        mat.emissive = emissiveColor;
+        mat.color.setRGB(emissiveBoost, emissiveBoost, emissiveBoost);
+        mat.emissive = subtleEmissiveColor;
         mat.emissiveIntensity = emissiveIntensity;
         mat.roughness = roughness;
         mat.clearcoat = clearcoat;
@@ -227,37 +225,14 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
         mat.ior = ior;
         mat.iridescence = iridescence;
         mat.iridescenceIOR = iridescenceIOR;
+        mat.specularIntensity = specularIntensity;
         mat.needsUpdate = true;
       });
     } else {
-      const preset = finishPresets[productConfig.vinylFinish] || finishPresets.brillante;
-      let roughness = preset?.roughness ?? 0.15;
-      let clearcoat = preset?.clearcoat ?? 0.6;
-      let clearcoatRoughness = reflRough ?? preset?.clearcoatRoughness ?? 0.012;
-      let envMapIntensity = preset?.envMapIntensity ?? 0.8;
-      let ior = 1.50;
-      let iridescence = preset?.iridescence ?? 0;
-      let iridescenceIOR = preset?.iridescenceIOR ?? 1.3;
-
-      if (productConfig.vinylFinish === 'mate') {
-        roughness = 0.92;
-        clearcoat = 0;
-        envMapIntensity = 0.1;
-        iridescence = 0;
-      } else if (productConfig.vinylFinish === 'tornasolado') {
-        iridescence = 1.0;
-        iridescenceIOR = 1.45;
-      }
-
-      if (productConfig.hasResina) {
-        clearcoat = 1.0;
-        clearcoatRoughness = reflRough ?? 0.012;
-        roughness = 0.012;
-        ior = 1.50;
-        envMapIntensity = 1.8;
-      }
-
       frontMaterials.forEach((mat) => {
+        mat.color.setRGB(emissiveBoost, emissiveBoost, emissiveBoost);
+        mat.emissive = new THREE.Color(0xffffff);
+        mat.emissiveIntensity = 0.1;
         mat.roughness = roughness;
         mat.clearcoat = clearcoat;
         mat.clearcoatRoughness = clearcoatRoughness;
@@ -265,6 +240,7 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
         mat.ior = ior;
         mat.iridescence = iridescence;
         mat.iridescenceIOR = iridescenceIOR;
+        mat.specularIntensity = specularIntensity;
         mat.needsUpdate = true;
       });
     }
@@ -329,7 +305,11 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
         renderer.setSize(660, 660);
         renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
         renderer.outputColorSpace = THREE.SRGBColorSpace;
-        renderer.toneMapping = THREE.NoToneMapping; // Zero-Loss Original Color Fidelity
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.05;
+
+        const pmremGenerator = new THREE.PMREMGenerator(renderer);
+        pmremGenerator.compileEquirectangularShader();
 
         const maxAniso = renderer.capabilities.getMaxAnisotropy ? renderer.capabilities.getMaxAnisotropy() : 16;
 
@@ -425,37 +405,24 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
           gradedTextures.push(gTex);
 
           const preset = finishPresets[productConfig.vinylFinish] || finishPresets.brillante;
-          let roughness = preset?.roughness ?? 0.15;
-          let clearcoat = preset?.clearcoat ?? 0.6;
-          let clearcoatRoughness = reflectionRoughness ?? preset?.clearcoatRoughness ?? 0.012;
-          let envMapIntensity = preset?.envMapIntensity ?? 0.8;
-          let ior = 1.50;
-          let iridescence = preset?.iridescence ?? 0;
-          let iridescenceIOR = preset?.iridescenceIOR ?? 1.3;
+          const p = productConfig.hasResina ? { ...preset, ...RESIN_OVERLAY } : preset;
+          const emissiveBoost = p.colorBoost ?? 1.0;
 
-          if (productConfig.vinylFinish === 'mate') {
-            roughness = 0.92;
-            clearcoat = 0;
-            envMapIntensity = 0.1;
-            iridescence = 0;
-          } else if (productConfig.vinylFinish === 'tornasolado') {
-            iridescence = 1.0;
-            iridescenceIOR = 1.45;
-          }
-
-          if (productConfig.hasResina) {
-            clearcoat = 1.0;
-            clearcoatRoughness = reflectionRoughness ?? 0.012;
-            roughness = 0.012;
-            ior = 1.50;
-            envMapIntensity = 1.8;
-          }
+          const roughness = p.roughness;
+          const clearcoat = p.clearcoat;
+          const clearcoatRoughness = reflectionRoughness ?? p.clearcoatRoughness;
+          const envMapIntensity = p.envMapIntensity;
+          const ior = 1.50;
+          const iridescence = p.iridescence ?? 0;
+          const iridescenceIOR = p.iridescenceIOR ?? 1.3;
+          const specularIntensity = p.specularIntensity ?? (productConfig.hasResina ? 2.2 : 1.4);
 
           const frontMat = new THREE.MeshPhysicalMaterial({
-            color: 0x000000, // Black base
-            emissive: 0xffffff,
+            map: gTex,
+            color: new THREE.Color(emissiveBoost, emissiveBoost, emissiveBoost),
+            emissive: new THREE.Color(0xffffff),
             emissiveMap: gTex,
-            emissiveIntensity: 1.0, // 100% Exact 1:1 Original Color Fidelity
+            emissiveIntensity: 0.1,
             roughness: roughness,
             clearcoat: clearcoat,
             clearcoatRoughness: clearcoatRoughness,
@@ -463,6 +430,7 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
             ior: ior,
             iridescence: iridescence,
             iridescenceIOR: iridescenceIOR,
+            specularIntensity: specularIntensity,
           });
 
           // Elegant dark slim edges with subtle specular rim
@@ -518,6 +486,8 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
 
         threeState.current = {
           renderer,
+          pmremGenerator,
+          currentEnvRenderTarget: null,
           scene,
           camera,
           artGroup,
@@ -557,6 +527,8 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
     return () => {
       alive = false;
       if (threeState.current.animId) cancelAnimationFrame(threeState.current.animId);
+      if (threeState.current.currentEnvRenderTarget) threeState.current.currentEnvRenderTarget.dispose();
+      if (threeState.current.pmremGenerator) threeState.current.pmremGenerator.dispose();
       if (threeState.current.renderer) threeState.current.renderer.dispose();
     };
   }, [environment, selectedImage, artworkSlots, panelsCount, productConfig.setMode, productConfig.vinylFinish, productConfig.hasResina, reflectionIntensity]);

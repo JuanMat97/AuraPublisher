@@ -6,6 +6,7 @@ import { MockupGridView } from './components/Workspace/MockupGridView';
 import { UnsplashHubModal } from './components/Workspace/UnsplashHubModal';
 import { InfographicsView } from './components/Workspace/InfographicsView';
 import { SeoCopyView } from './components/Workspace/SeoCopyView';
+import { PublishView } from './components/Workspace/PublishView';
 import { PresetsView } from './components/Workspace/PresetsView';
 import { InspectorPanel } from './components/Inspector/InspectorPanel';
 import { HistoryDrawer } from './components/History/HistoryDrawer';
@@ -83,6 +84,7 @@ export const App: React.FC = () => {
           {/* Center Pane: Dynamic Workspace Canvas */}
           <main style={{ flex: 1, overflow: 'hidden', display: 'flex' }}>
             {currentView === 'studio' && <MockupGridView />}
+            {currentView === 'publish' && <PublishView />}
             {currentView === 'unsplash' && <UnsplashHubModal />}
             {currentView === 'infographics' && <InfographicsView />}
             {currentView === 'seo' && <SeoCopyView />}

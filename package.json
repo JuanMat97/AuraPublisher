@@ -39,6 +39,7 @@
     "sharp": "^0.33.5",
     "three": "^0.170.0",
     "three-stdlib": "^2.35.0",
+    "xlsx": "^0.18.5",
     "zustand": "^5.0.3"
   },
   "devDependencies": {

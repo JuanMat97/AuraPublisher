@@ -9,4 +9,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setStore: (data: any) => ipcRenderer.invoke('store:set', data),
   saveBase64: (params: { base64Data: string; targetPath: string; quality?: number }) =>
     ipcRenderer.invoke('file:saveBase64', params),
+  saveBuffer: (params: { buffer: Uint8Array | ArrayBuffer; targetPath: string }) =>
+    ipcRenderer.invoke('file:saveBuffer', params),
+  readTemplate: (filePath: string) =>
+    ipcRenderer.invoke('file:readTemplate', filePath),
 });
+

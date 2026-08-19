@@ -17,7 +17,10 @@ export interface ElectronAPI {
   getStore: () => Promise<any>;
   setStore: (data: any) => Promise<boolean>;
   saveBase64: (params: { base64Data: string; targetPath: string; quality?: number }) => Promise<{ success: boolean; path?: string; error?: string }>;
+  saveBuffer: (params: { buffer: Uint8Array | ArrayBuffer; targetPath: string }) => Promise<{ success: boolean; path?: string; error?: string }>;
+  readTemplate: (filePath: string) => Promise<{ success: boolean; buffer?: Uint8Array; error?: string }>;
 }
+
 
 declare global {
   interface Window {

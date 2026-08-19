@@ -12,8 +12,22 @@ import {
   CATALOG_SIZES,
 } from '../types/catalog';
 import { EnvironmentScene, BUILTIN_ENVIRONMENTS } from '../types/environment';
+import {
+  PublicationType,
+  DetectedAspectRatio,
+  ADAPTABLE_SIZES,
+  AdaptableSize,
+  PUBLICATION_FINISHES,
+} from '../types/publication';
+import {
+  detectAspectRatio,
+  extractThemeAndDesignFromFilename,
+  generateAutoPublicationTitle,
+  generateDefaultPublicationDescription,
+} from '../utils/publicationHelpers';
 
-export type StudioView = 'studio' | 'seo' | 'infographics' | 'unsplash' | 'presets';
+export type StudioView = 'studio' | 'publish' | 'seo' | 'infographics' | 'unsplash' | 'presets';
+
 
 export interface ProductConfigState {
   sizeId: string;
@@ -89,6 +103,34 @@ interface AppStore {
   currentView: StudioView;
   setCurrentView: (view: StudioView) => void;
 
+  // Publication Workflow Step (1: Cargar, 2: Mockups, 3: Publicar, 4: Exportar)
+  currentStep: number;
+  setCurrentStep: (step: number) => void;
+
+  // Publication Metadata
+  detectedAspectRatio: DetectedAspectRatio;
+  publicationTheme: string;
+  setPublicationTheme: (theme: string) => void;
+  designName: string;
+  setDesignName: (name: string) => void;
+  publicationType: PublicationType;
+  setPublicationType: (type: PublicationType) => void;
+  publicationTitle: string;
+  setPublicationTitle: (title: string) => void;
+  publicationDescription: string;
+  setPublicationDescription: (desc: string) => void;
+  selectedSizes: string[];
+  setSelectedSizes: (sizes: string[]) => void;
+  toggleSelectedSize: (sizeId: string) => void;
+  selectedFinishes: string[];
+  setSelectedFinishes: (finishes: string[]) => void;
+  toggleSelectedFinish: (finishId: string) => void;
+  sizePrices: Record<string, number>;
+  setSizePrice: (sizeId: string, price: number) => void;
+  setSizePrices: (prices: Record<string, number>) => void;
+  generateAutoTitle: () => void;
+  generateAutoDescription: () => void;
+
   selectedImage: SelectedImage | null;
   setSelectedImage: (img: SelectedImage | null) => void;
   artworkSlots: Array<SelectedImage | null>;
@@ -135,22 +177,139 @@ interface AppStore {
   syncToStore: () => Promise<void>;
 }
 
+const defaultSizePrices: Record<string, number> = ADAPTABLE_SIZES.reduce(
+  (acc: Record<string, number>, s: AdaptableSize) => ({ ...acc, [s.id]: s.defaultPrice }),
+  {}
+);
+
 export const useAppStore = create<AppStore>((set, get) => ({
   currentView: 'studio',
-  setCurrentView: (view) => set({ currentView: view }),
+  setCurrentView: (view) => {
+    // Sync currentStep when switching views
+    let step = get().currentStep;
+    if (view === 'studio') step = get().selectedImage ? 2 : 1;
+    else if (view === 'publish') step = 3;
+    set({ currentView: view, currentStep: step });
+  },
+
+  currentStep: 1,
+  setCurrentStep: (step) => {
+    set({ currentStep: step });
+    if (step === 1 || step === 2) set({ currentView: 'studio' });
+    else if (step === 3) set({ currentView: 'publish' });
+    else if (step === 4) set({ currentView: 'publish' });
+  },
+
+  detectedAspectRatio: 'horizontal',
+  publicationTheme: '',
+  setPublicationTheme: (publicationTheme) => set({ publicationTheme }),
+  designName: '',
+  setDesignName: (designName) => set({ designName }),
+  publicationType: 'individual',
+  setPublicationType: (publicationType) => {
+    set({ publicationType });
+    // Regenerate title and description with new type if theme exists
+    const currentTheme = get().publicationTheme;
+    if (currentTheme) {
+      const title = generateAutoPublicationTitle(publicationType, currentTheme);
+      set({ publicationTitle: title });
+      set((state) => ({ productConfig: { ...state.productConfig, title } }));
+    }
+  },
+  publicationTitle: '',
+  setPublicationTitle: (publicationTitle) => {
+    set({ publicationTitle });
+    set((state) => ({ productConfig: { ...state.productConfig, title: publicationTitle } }));
+  },
+  publicationDescription: '',
+  setPublicationDescription: (publicationDescription) => set({ publicationDescription }),
+  selectedSizes: ['60x40', '70x40', '80x45', '90x50'],
+  setSelectedSizes: (selectedSizes) => set({ selectedSizes }),
+  toggleSelectedSize: (sizeId) =>
+    set((state) => {
+      const exists = state.selectedSizes.includes(sizeId);
+      return {
+        selectedSizes: exists
+          ? state.selectedSizes.filter((id) => id !== sizeId)
+          : [...state.selectedSizes, sizeId],
+      };
+    }),
+  selectedFinishes: ['mate', 'brillante', 'holografico', 'resina_brillante', 'resina_holografico'],
+  setSelectedFinishes: (selectedFinishes) => set({ selectedFinishes }),
+  toggleSelectedFinish: (finishId) =>
+    set((state) => {
+      const exists = state.selectedFinishes.includes(finishId);
+      return {
+        selectedFinishes: exists
+          ? state.selectedFinishes.filter((id) => id !== finishId)
+          : [...state.selectedFinishes, finishId],
+      };
+    }),
+  sizePrices: defaultSizePrices,
+  setSizePrice: (sizeId, price) =>
+    set((state) => ({
+      sizePrices: { ...state.sizePrices, [sizeId]: price },
+    })),
+  setSizePrices: (sizePrices) => set({ sizePrices }),
+
+  generateAutoTitle: () => {
+    const { publicationType, publicationTheme } = get();
+    const title = generateAutoPublicationTitle(publicationType, publicationTheme);
+    set({ publicationTitle: title });
+    set((state) => ({ productConfig: { ...state.productConfig, title } }));
+  },
+
+  generateAutoDescription: () => {
+    const { publicationTheme, designName, publicationType } = get();
+    const desc = generateDefaultPublicationDescription({
+      theme: publicationTheme,
+      designName,
+      type: publicationType,
+    });
+    set({ publicationDescription: desc });
+  },
 
   selectedImage: null,
   setSelectedImage: (img) => {
     const prevSlots = get().artworkSlots;
     const newSlots = [...prevSlots];
     newSlots[0] = img;
-    set({
-      selectedImage: img,
-      artworkSlots: newSlots,
-    });
-    if (img && !get().productConfig.title) {
-      const title = img.filename.replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' ');
-      set((state) => ({ productConfig: { ...state.productConfig, title } }));
+
+    if (img) {
+      const detectedRatio = detectAspectRatio(img.width, img.height);
+      const { theme, designName } = extractThemeAndDesignFromFilename(img.filename);
+      const currentType = get().publicationType;
+      const autoTitle = generateAutoPublicationTitle(currentType, theme);
+      const autoDesc = generateDefaultPublicationDescription({
+        theme,
+        designName,
+        type: currentType,
+      });
+
+      // Filter and pre-select sizes matching the detected aspect ratio
+      const matchingSizes = ADAPTABLE_SIZES.filter((s: AdaptableSize) => s.aspectRatio === detectedRatio).map((s: AdaptableSize) => s.id);
+      const selectedSizes = matchingSizes.length > 0 ? matchingSizes : ['60x40', '70x40', '80x45', '90x50'];
+
+      set((state) => ({
+        selectedImage: img,
+        artworkSlots: newSlots,
+        detectedAspectRatio: detectedRatio,
+        publicationTheme: theme,
+        designName: designName,
+        publicationTitle: autoTitle,
+        publicationDescription: autoDesc,
+        selectedSizes: selectedSizes,
+        currentStep: state.currentStep === 1 ? 2 : state.currentStep,
+        productConfig: {
+          ...state.productConfig,
+          title: autoTitle,
+        },
+      }));
+    } else {
+      set({
+        selectedImage: null,
+        artworkSlots: newSlots,
+      });
     }
   },
 
@@ -429,6 +588,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
           if (storeData.presets) set({ presets: storeData.presets });
           if (storeData.history) set({ history: storeData.history });
           if (storeData.outputFolder) set({ outputFolder: storeData.outputFolder });
+          if (storeData.publicationType) set({ publicationType: storeData.publicationType });
+          if (storeData.sizePrices) set((state) => ({ sizePrices: { ...state.sizePrices, ...storeData.sizePrices } }));
+          if (storeData.selectedFinishes) set({ selectedFinishes: storeData.selectedFinishes });
         }
       } catch (e) {
         console.error('Error loading electron store:', e);
@@ -446,6 +608,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
         presets: state.presets,
         history: state.history,
         outputFolder: state.outputFolder,
+        publicationType: state.publicationType,
+        sizePrices: state.sizePrices,
+        selectedFinishes: state.selectedFinishes,
       });
     }
   },

@@ -1,6 +1,6 @@
 import React from 'react';
 import { useAppStore } from '../../store/appStore';
-import { Folder, History, UploadCloud, RefreshCw } from 'lucide-react';
+import { Folder, History, UploadCloud, RefreshCw, Check } from 'lucide-react';
 import { processFileToSelectedImage } from '../../utils/imageLoader';
 
 interface HeaderBarProps {
@@ -9,7 +9,16 @@ interface HeaderBarProps {
 }
 
 export const HeaderBar: React.FC<HeaderBarProps> = ({ onOpenHistory, onOpenPresets }) => {
-  const { selectedImage, setSelectedImage, outputFolder, history, setCurrentView } = useAppStore();
+  const {
+    selectedImage,
+    setSelectedImage,
+    outputFolder,
+    history,
+    currentView,
+    setCurrentView,
+    currentStep,
+    setCurrentStep,
+  } = useAppStore();
 
   const handleOpenImage = () => {
     if (window.electronAPI) {
@@ -84,46 +93,123 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({ onOpenHistory, onOpenPrese
         </div>
       </div>
 
-      {/* Center Breadcrumb / Load Artwork Button */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-        {selectedImage ? (
-          <button
-            onClick={handleOpenImage}
-            title="Hacé clic para cambiar la obra cargada"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              padding: '5px 14px',
-              background: 'rgba(255, 255, 255, 0.05)',
-              backdropFilter: 'blur(12px)',
-              borderRadius: 'var(--radius-full)',
-              border: '1px solid rgba(255, 255, 255, 0.12)',
-              cursor: 'pointer',
-              color: '#ffffff',
-            }}
-          >
-            <RefreshCw size={12} color="var(--accent-primary)" />
-            <span style={{ fontSize: '11px', color: '#94a3b8' }}>Obra:</span>
-            <span style={{ fontSize: '12px', fontWeight: 600, color: '#ffffff', maxWidth: '240px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {selectedImage.filename}
-            </span>
-            {selectedImage.width && selectedImage.height && (
-              <span style={{ fontSize: '10px', padding: '1px 6px', borderRadius: '4px', background: 'rgba(222, 35, 103, 0.15)', color: 'var(--accent-primary)', fontFamily: 'var(--font-mono)' }}>
-                {selectedImage.width}×{selectedImage.height}px
-              </span>
-            )}
-          </button>
-        ) : (
-          <button
-            className="btn btn-primary"
-            onClick={handleOpenImage}
-            style={{ padding: '6px 14px', fontSize: '12px', borderRadius: '8px' }}
-          >
-            <UploadCloud size={14} />
-            <span>Cargar Obra Principal</span>
-          </button>
-        )}
+      {/* Center 4-Step Publication Workflow Stepper */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        background: 'rgba(0, 0, 0, 0.4)',
+        border: '1px solid rgba(255, 255, 255, 0.1)',
+        borderRadius: '12px',
+        padding: '3px 4px',
+        gap: '4px',
+      }}>
+        {/* Step 1: Cargar */}
+        <button
+          onClick={handleOpenImage}
+          title={selectedImage ? `Obra: ${selectedImage.filename}` : 'Cargar obra principal'}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            padding: '5px 10px',
+            borderRadius: '8px',
+            border: currentStep === 1 ? '1px solid var(--accent-primary)' : '1px solid transparent',
+            background: currentStep === 1 ? 'var(--accent-primary-subtle)' : selectedImage ? 'rgba(16, 185, 129, 0.1)' : 'transparent',
+            color: selectedImage ? '#34d399' : '#cbd5e1',
+            fontSize: '11px',
+            fontWeight: 600,
+            cursor: 'pointer',
+          }}
+        >
+          <UploadCloud size={12} color={selectedImage ? '#34d399' : 'currentColor'} />
+          <span>1. {selectedImage ? 'Cargado' : 'Cargar'}</span>
+          {selectedImage && <Check size={10} color="#34d399" />}
+        </button>
+
+        <span style={{ color: '#475569', fontSize: '10px' }}>›</span>
+
+        {/* Step 2: Mockups */}
+        <button
+          onClick={() => {
+            setCurrentStep(2);
+            setCurrentView('studio');
+          }}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            padding: '5px 10px',
+            borderRadius: '8px',
+            border: currentStep === 2 && currentView === 'studio' ? '1px solid var(--accent-primary)' : '1px solid transparent',
+            background: currentStep === 2 && currentView === 'studio' ? 'var(--accent-primary-subtle)' : 'transparent',
+            color: currentStep === 2 && currentView === 'studio' ? '#ffffff' : '#94a3b8',
+            fontSize: '11px',
+            fontWeight: 600,
+            cursor: 'pointer',
+          }}
+        >
+          <span>2. Mockups</span>
+        </button>
+
+        <span style={{ color: '#475569', fontSize: '10px' }}>›</span>
+
+        {/* Step 3: Publicar */}
+        <button
+          onClick={() => {
+            setCurrentStep(3);
+            setCurrentView('publish');
+          }}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            padding: '5px 10px',
+            borderRadius: '8px',
+            border: currentView === 'publish' ? '1px solid var(--accent-primary)' : '1px solid transparent',
+            background: currentView === 'publish' ? 'var(--accent-primary-subtle)' : 'transparent',
+            color: currentView === 'publish' ? '#ffffff' : '#94a3b8',
+            fontSize: '11px',
+            fontWeight: 600,
+            cursor: 'pointer',
+          }}
+        >
+          <span>3. Publicar</span>
+          <span style={{
+            fontSize: '8px',
+            fontWeight: 800,
+            padding: '1px 4px',
+            borderRadius: '4px',
+            background: 'rgba(222, 35, 103, 0.2)',
+            color: 'var(--accent-primary)',
+          }}>
+            ML
+          </span>
+        </button>
+
+        <span style={{ color: '#475569', fontSize: '10px' }}>›</span>
+
+        {/* Step 4: Exportar */}
+        <button
+          onClick={() => {
+            setCurrentStep(4);
+            setCurrentView('publish');
+          }}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            padding: '5px 10px',
+            borderRadius: '8px',
+            border: currentStep === 4 ? '1px solid var(--accent-primary)' : '1px solid transparent',
+            background: currentStep === 4 ? 'var(--accent-primary-subtle)' : 'transparent',
+            color: currentStep === 4 ? '#ffffff' : '#94a3b8',
+            fontSize: '11px',
+            fontWeight: 600,
+            cursor: 'pointer',
+          }}
+        >
+          <span>4. Exportar</span>
+        </button>
       </div>
 
       {/* Right Controls */}
