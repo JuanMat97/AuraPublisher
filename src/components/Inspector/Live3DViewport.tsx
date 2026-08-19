@@ -131,7 +131,7 @@ export const Live3DViewport: React.FC = () => {
           size={{ w: currentSize.widthCm, h: currentSize.heightCm }}
           gap={productConfig.setSpacingCm || 3}
           mood={productConfig.lightMode || 'day'}
-          reflectionType={productConfig.reflectionType || 'studio_grid'}
+          reflectionType={productConfig.reflectionType || 'panoramic_window'}
           rotationY={orbitRotation.y}
         />
 

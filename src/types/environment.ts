@@ -32,6 +32,21 @@ export interface LightSource3D {
   z: number;
 }
 
+export type ReflectionType =
+  | 'industrial_loft'
+  | 'panoramic_window'
+  | 'sunny_balcony'
+  | 'french_window'
+  | 'double_corner'
+  | 'skylight_zenith'
+  | 'gallery_track'
+  | 'warm_lamp'
+  | 'estudio'
+  | 'loft'
+  | 'galeria'
+  | 'ventanal_noche'
+  | 'modern_window';
+
 export interface MockupPosition {
   id: string;
   name: string;
@@ -53,7 +68,7 @@ export interface MockupPosition {
   rollAngle?: number;
   thicknessCm?: number;
   zDistance?: number;
-  reflectionType?: import('./catalog').ReflectionType;
+  reflectionType?: ReflectionType;
   reflectionDirection?: import('./catalog').ReflectionDirection;
   reflectionAngleDeg?: number;
   reflectionIntensity?: number;
@@ -80,6 +95,12 @@ export interface MockupPosition {
   hue?: number;
   saturation?: number;
   invert?: boolean;
+  ceilingLightsEnabled?: boolean;
+  ceilingLightTemp?: 'warm' | 'neutral' | 'cool';
+  sunIntensity?: number; // 0..200, default 100
+  isWallAnchored?: boolean;
+  wallCalibratedAngle?: number;
+  wallCalibratedPitch?: number;
   adjust?: import('./catalog').CanvaImageAdjustOptions;
 }
 

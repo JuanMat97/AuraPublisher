@@ -12,11 +12,12 @@ import { finishPresets, RESIN_OVERLAY } from '../components/configurador3d/finis
 export type { CanvaImageAdjustOptions };
 
 export function getReflectionTypeForEnvironment(category?: string): ReflectionType {
-  if (category === 'galeria') return 'art_gallery';
+  if (category === 'galeria') return 'gallery_track';
   if (category === 'oficina') return 'industrial_loft';
-  if (category === 'dormitorio') return 'sunset_window';
-  if (category === 'hall') return 'crystal_minimal';
-  return 'studio_grid';
+  if (category === 'dormitorio') return 'warm_lamp';
+  if (category === 'hall') return 'french_window';
+  if (category === 'living') return 'panoramic_window';
+  return 'panoramic_window';
 }
 
 /**
@@ -88,6 +89,14 @@ export interface RenderWebGLRoomOptions {
   weatherPreset?: 'morning' | 'warm_afternoon' | 'intimate_night' | 'sunny_contrast' | 'overcast_soft' | string;
   shelfContactShadow?: boolean;
   wallHarmonization?: number; // 0..1 (default 0.35)
+
+  // Ceiling Lights & Sun Engine
+  ceilingLightsEnabled?: boolean;
+  ceilingLightTemp?: 'warm' | 'neutral' | 'cool';
+  sunIntensity?: number; // 0..200, default 100
+  isWallAnchored?: boolean;
+  wallCalibratedAngle?: number;
+  wallCalibratedPitch?: number;
 
   // Complete Canva Image Adjustment
   adjust?: CanvaImageAdjustOptions;
@@ -583,14 +592,17 @@ export interface RaytracingEquirectangularMapOptions {
   weatherPreset?: 'morning' | 'warm_afternoon' | 'intimate_night' | 'sunny_contrast' | 'overcast_soft' | string;
   reflectionBrightness?: number;
   reflectionContrast?: number;
+  ceilingLightsEnabled?: boolean;
+  ceilingLightTemp?: 'warm' | 'neutral' | 'cool';
 }
 
 /**
- * High-Definition HDR Raytracing Equirectangular Reflection Maps with 360° Rotation and Scale.
+ * High-Definition HDR Raytracing Equirectangular Reflection Maps with 360° Rotation,
+ * 8 Architectural Window Presets, and Industrial Ceiling Lights.
  */
 export function generateRaytracingEquirectangularMap(options: RaytracingEquirectangularMapOptions): THREE.CanvasTexture {
   const {
-    reflectionType = 'studio_grid',
+    reflectionType = 'panoramic_window',
     angleDeg = 0,
     intensity = 1.0,
     scale = 1.0,
@@ -598,6 +610,8 @@ export function generateRaytracingEquirectangularMap(options: RaytracingEquirect
     weatherPreset,
     reflectionBrightness = 0,
     reflectionContrast = 0,
+    ceilingLightsEnabled,
+    ceilingLightTemp = 'neutral',
   } = options;
 
   const canvas = document.createElement('canvas');
@@ -615,106 +629,21 @@ export function generateRaytracingEquirectangularMap(options: RaytracingEquirect
   const vCenter = 460;
   const effScale = Math.max(0.4, Math.min(2.5, scale));
 
+  // Resolve style and aliases
+  let resolvedStyle: string = reflectionType;
+  if (resolvedStyle === 'loft') resolvedStyle = 'industrial_loft';
+  else if (resolvedStyle === 'estudio' || resolvedStyle === 'modern_window' || resolvedStyle === 'crystal_minimal') resolvedStyle = 'panoramic_window';
+  else if (resolvedStyle === 'galeria' || resolvedStyle === 'art_gallery') resolvedStyle = 'gallery_track';
+  else if (resolvedStyle === 'ventanal_noche' || resolvedStyle === 'spotlight') resolvedStyle = 'warm_lamp';
+  else if (resolvedStyle === 'studio_grid' || resolvedStyle === 'sunset_window') resolvedStyle = 'sunny_balcony';
+
   const drawLightformerAt = (cx: number) => {
     ctx.save();
 
-    if (reflectionType === 'studio_grid') {
-      // PROFILE 1: Ventanal Panorámico con Árboles y Follaje Exterior (Referencia ArchViz de Lujo)
-      const gW = 740 * effScale;
-      const gH = 700 * effScale;
-      const gX = cx - gW / 2;
-      const gY = vCenter - gH / 2;
-      const frameThickness = 14 * effScale;
-      const paneW = (gW - frameThickness * 3) / 2;
-      const paneH = (gH - frameThickness * 3) / 2;
-
-      // 1. Exterior Sky Light across the 4 Window Panes
-      for (let row = 0; row < 2; row++) {
-        for (let col = 0; col < 2; col++) {
-          const px = gX + frameThickness + col * (paneW + frameThickness);
-          const py = gY + frameThickness + row * (paneH + frameThickness);
-
-          // Glass Sky Gradient (Luminous crisp sky with natural falloff)
-          const pGrad = ctx.createLinearGradient(px, py, px, py + paneH);
-          pGrad.addColorStop(0, 'rgba(255, 255, 255, 1.0)');
-          pGrad.addColorStop(0.35, 'rgba(250, 252, 255, 0.92)');
-          pGrad.addColorStop(0.75, 'rgba(230, 238, 248, 0.70)');
-          pGrad.addColorStop(1, 'rgba(195, 208, 225, 0.40)');
-          ctx.fillStyle = pGrad;
-          ctx.fillRect(px, py, paneW, paneH);
-
-          // Subtle Glass Edge Highlight
-          ctx.strokeStyle = 'rgba(255, 255, 255, 0.60)';
-          ctx.lineWidth = Math.max(1, 2 * effScale);
-          ctx.strokeRect(px + 1, py + 1, paneW - 2, paneH - 2);
-        }
-      }
-
-      // 2. Scenic Exterior Nature (Tree Branches & Leaf Foliage Silhouettes outside the glass)
-      ctx.save();
-      // Clip to window area so trees only appear through the glass panes
-      ctx.beginPath();
-      ctx.rect(gX + frameThickness, gY + frameThickness, gW - frameThickness * 2, gH - frameThickness * 2);
-      ctx.clip();
-
-      // Main Tree Trunk / Branch (Entering from top-left)
-      ctx.strokeStyle = 'rgba(22, 32, 26, 0.85)';
-      ctx.lineWidth = 10 * effScale;
-      ctx.lineCap = 'round';
-      ctx.beginPath();
-      ctx.moveTo(gX, gY + 120 * effScale);
-      ctx.quadraticCurveTo(gX + 160 * effScale, gY + 180 * effScale, gX + 320 * effScale, gY + 140 * effScale);
-      ctx.stroke();
-
-      // Secondary Branches
-      ctx.lineWidth = 5 * effScale;
-      ctx.beginPath();
-      ctx.moveTo(gX + 140 * effScale, gY + 170 * effScale);
-      ctx.quadraticCurveTo(gX + 220 * effScale, gY + 280 * effScale, gX + 280 * effScale, gY + 340 * effScale);
-      ctx.moveTo(gX + 260 * effScale, gY + 150 * effScale);
-      ctx.quadraticCurveTo(gX + 360 * effScale, gY + 220 * effScale, gX + 440 * effScale, gY + 200 * effScale);
-      ctx.stroke();
-
-      // Leaf Foliage Clusters (Organic shapes with varying opacity)
-      const drawLeafCluster = (lx: number, ly: number, size: number, opacity: number) => {
-        ctx.fillStyle = `rgba(18, 28, 22, ${opacity})`;
-        ctx.beginPath();
-        ctx.arc(lx, ly, size, 0, Math.PI * 2);
-        ctx.arc(lx + size * 0.5, ly - size * 0.3, size * 0.8, 0, Math.PI * 2);
-        ctx.arc(lx - size * 0.4, ly + size * 0.2, size * 0.7, 0, Math.PI * 2);
-        ctx.arc(lx + size * 0.2, ly + size * 0.5, size * 0.6, 0, Math.PI * 2);
-        ctx.fill();
-      };
-
-      drawLeafCluster(gX + 80 * effScale, gY + 110 * effScale, 36 * effScale, 0.78);
-      drawLeafCluster(gX + 160 * effScale, gY + 160 * effScale, 42 * effScale, 0.82);
-      drawLeafCluster(gX + 230 * effScale, gY + 130 * effScale, 38 * effScale, 0.75);
-      drawLeafCluster(gX + 310 * effScale, gY + 140 * effScale, 48 * effScale, 0.85);
-      drawLeafCluster(gX + 390 * effScale, gY + 170 * effScale, 35 * effScale, 0.70);
-      drawLeafCluster(gX + 240 * effScale, gY + 260 * effScale, 32 * effScale, 0.65);
-      drawLeafCluster(gX + 290 * effScale, gY + 320 * effScale, 28 * effScale, 0.60);
-      drawLeafCluster(gX + 50 * effScale, gY + 240 * effScale, 30 * effScale, 0.55);
-
-      ctx.restore();
-
-      // 3. Dark Architectural Mullions & Transom Bars (Black Metal Frames)
-      ctx.strokeStyle = '#06080c';
-      ctx.lineWidth = frameThickness;
-      ctx.strokeRect(gX + frameThickness / 2, gY + frameThickness / 2, gW - frameThickness, gH - frameThickness);
-
-      ctx.beginPath();
-      // Center Vertical Mullion
-      ctx.moveTo(gX + frameThickness + paneW + frameThickness / 2, gY);
-      ctx.lineTo(gX + frameThickness + paneW + frameThickness / 2, gY + gH);
-      // Center Horizontal Transom
-      ctx.moveTo(gX, gY + frameThickness + paneH + frameThickness / 2);
-      ctx.lineTo(gX + gW, gY + frameThickness + paneH + frameThickness / 2);
-      ctx.stroke();
-
-    } else if (reflectionType === 'industrial_loft') {
-      // PROFILE 2: Loft Industrial 9 Paneles (3x3 Grid con Hierro Negro)
-      const lW = 720 * effScale;
-      const lH = 680 * effScale;
+    if (resolvedStyle === 'industrial_loft') {
+      // 1. INDUSTRIAL LOFT: Multi-pane grid iron window with horizontal/vertical mullions (3x3 Grid con Hierro Negro)
+      const lW = 760 * effScale;
+      const lH = 700 * effScale;
       const lX = cx - lW / 2;
       const lY = vCenter - lH / 2;
       const fThick = 12 * effScale;
@@ -725,9 +654,9 @@ export function generateRaytracingEquirectangularMap(options: RaytracingEquirect
         for (let c = 0; c < 3; c++) {
           const px = lX + fThick + c * (pW + fThick);
           const py = lY + fThick + r * (pH + fThick);
-          const pGrad = ctx.createLinearGradient(px, py, px + pW * 0.5, py + pH);
+          const pGrad = ctx.createLinearGradient(px, py, px + pW * 0.3, py + pH);
           pGrad.addColorStop(0, 'rgba(255, 255, 255, 0.98)');
-          pGrad.addColorStop(0.5, 'rgba(242, 246, 252, 0.85)');
+          pGrad.addColorStop(0.45, 'rgba(242, 246, 252, 0.88)');
           pGrad.addColorStop(1, 'rgba(195, 205, 220, 0.35)');
           ctx.fillStyle = pGrad;
           ctx.fillRect(px, py, pW, pH);
@@ -751,102 +680,442 @@ export function generateRaytracingEquirectangularMap(options: RaytracingEquirect
       ctx.moveTo(lX, lY + (fThick + pH) * 2 + fThick / 2); ctx.lineTo(lX + lW, lY + (fThick + pH) * 2 + fThick / 2);
       ctx.stroke();
 
-    } else if (reflectionType === 'crystal_minimal') {
-      // PROFILE 3: Softbox de Estudio Comercial Publicitario (Strip-box de Catálogo de Lujo)
-      const sbW = 340 * effScale;
-      const sbH = 780 * effScale;
-      const sbX = cx - sbW / 2;
-      const sbY = vCenter - sbH / 2;
+    } else if (resolvedStyle === 'panoramic_window') {
+      // 2. PANORAMIC WINDOW: Floor-to-ceiling wide glass window with soft gradient
+      const pW = 960 * effScale;
+      const pH = 780 * effScale;
+      const pX = cx - pW / 2;
+      const pY = vCenter - pH / 2;
 
-      // Primary Vertical Strip Softbox with High-Gradient Luminous Core
-      const sbGrad = ctx.createLinearGradient(sbX, sbY, sbX + sbW, sbY);
-      sbGrad.addColorStop(0, 'rgba(255, 255, 255, 0.10)');
-      sbGrad.addColorStop(0.35, 'rgba(255, 255, 255, 0.98)');
-      sbGrad.addColorStop(0.5, 'rgba(255, 255, 255, 1.0)');
-      sbGrad.addColorStop(0.65, 'rgba(255, 255, 255, 0.98)');
-      sbGrad.addColorStop(1, 'rgba(255, 255, 255, 0.10)');
-      ctx.fillStyle = sbGrad;
-      ctx.fillRect(sbX, sbY, sbW, sbH);
+      const panGrad = ctx.createLinearGradient(pX, pY, pX, pY + pH);
+      panGrad.addColorStop(0, 'rgba(255, 255, 255, 1.0)');
+      panGrad.addColorStop(0.25, 'rgba(250, 252, 255, 0.95)');
+      panGrad.addColorStop(0.65, 'rgba(232, 240, 250, 0.65)');
+      panGrad.addColorStop(1, 'rgba(195, 210, 230, 0.25)');
+      ctx.fillStyle = panGrad;
+      ctx.fillRect(pX, pY, pW, pH);
 
-      // Secondary Accent Rim Strip Light
-      const rimX = cx + 260 * effScale;
-      const rimW = 80 * effScale;
-      const rimGrad = ctx.createLinearGradient(rimX, sbY, rimX + rimW, sbY);
-      rimGrad.addColorStop(0, 'rgba(255, 255, 255, 0)');
-      rimGrad.addColorStop(0.5, 'rgba(255, 255, 255, 0.85)');
-      rimGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
-      ctx.fillStyle = rimGrad;
-      ctx.fillRect(rimX, sbY + 50 * effScale, rimW, sbH - 100 * effScale);
+      // Frameless glass borders with soft edge falloff
+      const edgeGradLeft = ctx.createLinearGradient(pX, pY, pX + 80 * effScale, pY);
+      edgeGradLeft.addColorStop(0, 'rgba(0, 0, 0, 0.45)');
+      edgeGradLeft.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      ctx.fillStyle = edgeGradLeft;
+      ctx.fillRect(pX, pY, 80 * effScale, pH);
 
-    } else if (reflectionType === 'spotlight') {
-      // PROFILE 4: Luz de Living Moderno con Ventana Lateral
-      const winW = 520 * effScale;
-      const winH = 740 * effScale;
-      const winX = cx - winW / 2;
-      const winY = vCenter - winH / 2;
+      const edgeGradRight = ctx.createLinearGradient(pX + pW, pY, pX + pW - 80 * effScale, pY);
+      edgeGradRight.addColorStop(0, 'rgba(0, 0, 0, 0.45)');
+      edgeGradRight.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      ctx.fillStyle = edgeGradRight;
+      ctx.fillRect(pX + pW - 80 * effScale, pY, 80 * effScale, pH);
 
-      const winGrad = ctx.createLinearGradient(winX, winY, winX + winW, winY + winH);
-      winGrad.addColorStop(0, 'rgba(255, 255, 255, 0.98)');
-      winGrad.addColorStop(0.4, 'rgba(248, 250, 255, 0.85)');
-      winGrad.addColorStop(0.8, 'rgba(215, 228, 245, 0.40)');
-      winGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
-      ctx.fillStyle = winGrad;
-      ctx.fillRect(winX, winY, winW, winH);
-
-      // Living Interior Silhouette (Curtain drape on the side)
-      ctx.fillStyle = 'rgba(12, 16, 22, 0.85)';
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.75)';
+      ctx.lineWidth = Math.max(1, 2 * effScale);
       ctx.beginPath();
-      ctx.moveTo(winX, winY);
-      ctx.quadraticCurveTo(winX + 120 * effScale, winY + 300 * effScale, winX + 80 * effScale, winY + winH);
-      ctx.lineTo(winX, winY + winH);
+      ctx.moveTo(cx, pY);
+      ctx.lineTo(cx, pY + pH);
+      ctx.stroke();
+
+    } else if (resolvedStyle === 'sunny_balcony') {
+      // 3. SUNNY BALCONY: High intensity sun flare with soft green outdoor tree canopy silhouettes
+      const bW = 880 * effScale;
+      const bH = 720 * effScale;
+      const bX = cx - bW / 2;
+      const bY = vCenter - bH / 2;
+
+      // Daylight Backing
+      const bGrad = ctx.createLinearGradient(bX, bY, bX, bY + bH);
+      bGrad.addColorStop(0, 'rgba(255, 255, 255, 1.0)');
+      bGrad.addColorStop(0.35, 'rgba(255, 250, 240, 0.95)');
+      bGrad.addColorStop(0.7, 'rgba(235, 242, 252, 0.70)');
+      bGrad.addColorStop(1, 'rgba(190, 205, 225, 0.35)');
+      ctx.fillStyle = bGrad;
+      ctx.fillRect(bX, bY, bW, bH);
+
+      // High Intensity Sun Flare (Luminous corona + warm flare rays)
+      const sunX = cx + 140 * effScale;
+      const sunY = bY + 160 * effScale;
+      const sunFlare = ctx.createRadialGradient(sunX, sunY, 15 * effScale, sunX, sunY, 340 * effScale);
+      sunFlare.addColorStop(0, 'rgba(255, 255, 255, 1.0)');
+      sunFlare.addColorStop(0.2, 'rgba(255, 252, 230, 0.98)');
+      sunFlare.addColorStop(0.5, 'rgba(255, 230, 180, 0.65)');
+      sunFlare.addColorStop(0.8, 'rgba(255, 210, 140, 0.25)');
+      sunFlare.addColorStop(1, 'rgba(255, 200, 120, 0)');
+      ctx.fillStyle = sunFlare;
+      ctx.beginPath();
+      ctx.arc(sunX, sunY, 340 * effScale, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Horizontal flare beam streak
+      const streakGrad = ctx.createLinearGradient(sunX - 450 * effScale, sunY, sunX + 450 * effScale, sunY);
+      streakGrad.addColorStop(0, 'rgba(255, 245, 220, 0)');
+      streakGrad.addColorStop(0.5, 'rgba(255, 255, 255, 0.85)');
+      streakGrad.addColorStop(1, 'rgba(255, 245, 220, 0)');
+      ctx.fillStyle = streakGrad;
+      ctx.fillRect(sunX - 450 * effScale, sunY - 8 * effScale, 900 * effScale, 16 * effScale);
+
+      // Outdoor Tree Canopy Silhouettes (Soft green organic leaves and branches)
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(bX, bY, bW, bH);
+      ctx.clip();
+
+      ctx.strokeStyle = 'rgba(26, 38, 28, 0.85)';
+      ctx.lineWidth = 12 * effScale;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(bX, bY + 140 * effScale);
+      ctx.quadraticCurveTo(bX + 180 * effScale, bY + 200 * effScale, bX + 360 * effScale, bY + 160 * effScale);
+      ctx.stroke();
+
+      ctx.lineWidth = 6 * effScale;
+      ctx.beginPath();
+      ctx.moveTo(bX + 160 * effScale, bY + 190 * effScale);
+      ctx.quadraticCurveTo(bX + 250 * effScale, bY + 300 * effScale, bX + 320 * effScale, bY + 360 * effScale);
+      ctx.moveTo(bX + 300 * effScale, bY + 170 * effScale);
+      ctx.quadraticCurveTo(bX + 420 * effScale, bY + 240 * effScale, bX + 500 * effScale, bY + 210 * effScale);
+      ctx.stroke();
+
+      const drawCanopyCluster = (lx: number, ly: number, size: number, opacity: number) => {
+        ctx.fillStyle = `rgba(28, 52, 34, ${opacity})`;
+        ctx.beginPath();
+        ctx.arc(lx, ly, size, 0, Math.PI * 2);
+        ctx.arc(lx + size * 0.5, ly - size * 0.3, size * 0.8, 0, Math.PI * 2);
+        ctx.arc(lx - size * 0.4, ly + size * 0.2, size * 0.7, 0, Math.PI * 2);
+        ctx.arc(lx + size * 0.2, ly + size * 0.5, size * 0.6, 0, Math.PI * 2);
+        ctx.fill();
+      };
+
+      drawCanopyCluster(bX + 90 * effScale, bY + 130 * effScale, 45 * effScale, 0.85);
+      drawCanopyCluster(bX + 180 * effScale, bY + 180 * effScale, 52 * effScale, 0.88);
+      drawCanopyCluster(bX + 270 * effScale, bY + 150 * effScale, 46 * effScale, 0.80);
+      drawCanopyCluster(bX + 370 * effScale, bY + 160 * effScale, 58 * effScale, 0.88);
+      drawCanopyCluster(bX + 460 * effScale, bY + 200 * effScale, 42 * effScale, 0.75);
+      drawCanopyCluster(bX + 280 * effScale, bY + 300 * effScale, 38 * effScale, 0.70);
+      drawCanopyCluster(bX + 340 * effScale, bY + 360 * effScale, 32 * effScale, 0.65);
+      drawCanopyCluster(bX + 60 * effScale, bY + 260 * effScale, 35 * effScale, 0.60);
+
+      // Balcony Railing Silhouette at bottom
+      ctx.strokeStyle = '#0e1217';
+      ctx.lineWidth = 10 * effScale;
+      ctx.beginPath();
+      ctx.moveTo(bX, bY + bH - 30 * effScale);
+      ctx.lineTo(bX + bW, bY + bH - 30 * effScale);
+      ctx.stroke();
+
+      ctx.lineWidth = 4 * effScale;
+      for (let rx = bX + 20 * effScale; rx < bX + bW; rx += 45 * effScale) {
+        ctx.beginPath();
+        ctx.moveTo(rx, bY + bH - 30 * effScale);
+        ctx.lineTo(rx, bY + bH);
+        ctx.stroke();
+      }
+      ctx.restore();
+
+    } else if (resolvedStyle === 'french_window') {
+      // 4. FRENCH WINDOW: Arched top tall double french window with elegant dividers
+      const fW = 600 * effScale;
+      const fH = 820 * effScale;
+      const fX = cx - fW / 2;
+      const fY = vCenter - fH / 2;
+      const archR = fW / 2;
+      const rectH = fH - archR;
+      const fThick = 12 * effScale;
+
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(cx, fY + archR, archR - fThick, Math.PI, 0, false);
+      ctx.lineTo(fX + fW - fThick, fY + fH - fThick);
+      ctx.lineTo(fX + fThick, fY + fH - fThick);
+      ctx.closePath();
+      ctx.clip();
+
+      const frGrad = ctx.createLinearGradient(fX, fY, fX, fY + fH);
+      frGrad.addColorStop(0, 'rgba(255, 255, 255, 1.0)');
+      frGrad.addColorStop(0.3, 'rgba(248, 252, 255, 0.94)');
+      frGrad.addColorStop(0.7, 'rgba(225, 235, 248, 0.65)');
+      frGrad.addColorStop(1, 'rgba(190, 205, 225, 0.35)');
+      ctx.fillStyle = frGrad;
+      ctx.fillRect(fX, fY, fW, fH);
+
+      // Radial Fanlight Dividers in Arch
+      ctx.strokeStyle = '#080b10';
+      ctx.lineWidth = 8 * effScale;
+      for (let a = Math.PI * 0.15; a < Math.PI * 0.95; a += Math.PI * 0.22) {
+        ctx.beginPath();
+        ctx.moveTo(cx, fY + archR);
+        ctx.lineTo(cx + Math.cos(a + Math.PI) * archR, fY + archR - Math.sin(a + Math.PI) * archR);
+        ctx.stroke();
+      }
+      ctx.restore();
+
+      // Outer Classical Arched Molding Frame
+      ctx.strokeStyle = '#080b10';
+      ctx.lineWidth = fThick;
+      ctx.beginPath();
+      ctx.arc(cx, fY + archR, archR - fThick / 2, Math.PI, 0, false);
+      ctx.lineTo(fX + fW - fThick / 2, fY + fH);
+      ctx.lineTo(fX + fThick / 2, fY + fH);
+      ctx.closePath();
+      ctx.stroke();
+
+      // Lower Double Door Dividers (2 columns x 4 rows)
+      const rowH = rectH / 4;
+      ctx.beginPath();
+      ctx.moveTo(cx, fY + archR); ctx.lineTo(cx, fY + fH);
+      for (let r = 0; r <= 4; r++) {
+        ctx.moveTo(fX, fY + archR + r * rowH);
+        ctx.lineTo(fX + fW, fY + archR + r * rowH);
+      }
+      ctx.stroke();
+
+    } else if (resolvedStyle === 'double_corner') {
+      // 5. DOUBLE CORNER: Corner window with two light axes at 90 degrees
+      const paneW = 460 * effScale;
+      const paneH = 720 * effScale;
+      const cornerY = vCenter - paneH / 2;
+      const leftX = cx - paneW - 10 * effScale;
+      const rightX = cx + 10 * effScale;
+      const fThick = 12 * effScale;
+
+      // Left Wall Window (Axis A)
+      const leftGrad = ctx.createLinearGradient(leftX, cornerY, leftX + paneW, cornerY + paneH);
+      leftGrad.addColorStop(0, 'rgba(255, 255, 255, 1.0)');
+      leftGrad.addColorStop(0.5, 'rgba(240, 246, 255, 0.85)');
+      leftGrad.addColorStop(1, 'rgba(185, 200, 220, 0.35)');
+      ctx.fillStyle = leftGrad;
+      ctx.fillRect(leftX, cornerY, paneW, paneH);
+
+      // Right Wall Window (Axis B - 90 deg corner perspective)
+      const rightGrad = ctx.createLinearGradient(rightX + paneW, cornerY, rightX, cornerY + paneH);
+      rightGrad.addColorStop(0, 'rgba(255, 255, 255, 0.95)');
+      rightGrad.addColorStop(0.5, 'rgba(235, 242, 252, 0.80)');
+      rightGrad.addColorStop(1, 'rgba(175, 190, 215, 0.30)');
+      ctx.fillStyle = rightGrad;
+      ctx.fillRect(rightX, cornerY, paneW, paneH);
+
+      // Frames & Mullions
+      ctx.strokeStyle = '#06080c';
+      ctx.lineWidth = fThick;
+      ctx.strokeRect(leftX + fThick / 2, cornerY + fThick / 2, paneW - fThick, paneH - fThick);
+      ctx.strokeRect(rightX + fThick / 2, cornerY + fThick / 2, paneW - fThick, paneH - fThick);
+
+      ctx.beginPath();
+      ctx.moveTo(leftX, cornerY + paneH / 2); ctx.lineTo(leftX + paneW, cornerY + paneH / 2);
+      ctx.moveTo(rightX, cornerY + paneH / 2); ctx.lineTo(rightX + paneW, cornerY + paneH / 2);
+      ctx.stroke();
+
+      // Heavy 90° Structural Corner Pillar
+      ctx.fillStyle = '#0a0d13';
+      ctx.fillRect(cx - 14 * effScale, cornerY - 10 * effScale, 28 * effScale, paneH + 20 * effScale);
+
+    } else if (resolvedStyle === 'skylight_zenith') {
+      // 6. SKYLIGHT ZENITH: Top ceiling rectangular glass roof with zenithal diffuse light
+      const skyW = 980 * effScale;
+      const skyH = 340 * effScale;
+      const skyX = cx - skyW / 2;
+      const skyY = 80 * effScale;
+
+      const skyGrad = ctx.createLinearGradient(skyX, skyY, skyX, skyY + skyH);
+      skyGrad.addColorStop(0, 'rgba(255, 255, 255, 1.0)');
+      skyGrad.addColorStop(0.4, 'rgba(248, 252, 255, 0.92)');
+      skyGrad.addColorStop(0.8, 'rgba(220, 235, 250, 0.60)');
+      skyGrad.addColorStop(1, 'rgba(180, 200, 230, 0.15)');
+      ctx.fillStyle = skyGrad;
+      ctx.fillRect(skyX, skyY, skyW, skyH);
+
+      const bloomGrad = ctx.createRadialGradient(cx, skyY + skyH / 2, 40 * effScale, cx, skyY + skyH / 2, 540 * effScale);
+      bloomGrad.addColorStop(0, 'rgba(255, 255, 255, 0.75)');
+      bloomGrad.addColorStop(0.5, 'rgba(240, 248, 255, 0.35)');
+      bloomGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+      ctx.fillStyle = bloomGrad;
+      ctx.fillRect(skyX - 100 * effScale, 0, skyW + 200 * effScale, skyH + 250 * effScale);
+
+      // Steel Roof Truss Rafters
+      ctx.strokeStyle = '#080a0f';
+      ctx.lineWidth = 14 * effScale;
+      ctx.strokeRect(skyX + 7 * effScale, skyY + 7 * effScale, skyW - 14 * effScale, skyH - 14 * effScale);
+
+      const numRafters = 6;
+      const rStep = skyW / numRafters;
+      ctx.beginPath();
+      for (let i = 1; i < numRafters; i++) {
+        ctx.moveTo(skyX + i * rStep, skyY);
+        ctx.lineTo(skyX + i * rStep, skyY + skyH);
+      }
+      ctx.stroke();
+
+    } else if (resolvedStyle === 'gallery_track') {
+      // 7. GALLERY TRACK: Focused rectangular spotlights array
+      const railW = 960 * effScale;
+      const railY = vCenter - 180 * effScale;
+      const railX = cx - railW / 2;
+
+      ctx.fillStyle = '#0c0e14';
+      ctx.fillRect(railX, railY, railW, 20 * effScale);
+      ctx.fillStyle = '#222632';
+      ctx.fillRect(railX, railY + 16 * effScale, railW, 4 * effScale);
+
+      const spotOffsets = [-300 * effScale, 0, 300 * effScale];
+      spotOffsets.forEach((offset) => {
+        const sx = cx + offset;
+
+        ctx.fillStyle = '#141720';
+        ctx.fillRect(sx - 24 * effScale, railY + 20 * effScale, 48 * effScale, 36 * effScale);
+
+        const coneGrad = ctx.createRadialGradient(sx, railY + 120 * effScale, 15 * effScale, sx, railY + 120 * effScale, 260 * effScale);
+        coneGrad.addColorStop(0, 'rgba(255, 255, 255, 1.0)');
+        coneGrad.addColorStop(0.3, 'rgba(250, 250, 255, 0.85)');
+        coneGrad.addColorStop(0.65, 'rgba(240, 245, 255, 0.35)');
+        coneGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+        ctx.fillStyle = coneGrad;
+
+        ctx.beginPath();
+        ctx.moveTo(sx - 20 * effScale, railY + 56 * effScale);
+        ctx.lineTo(sx + 20 * effScale, railY + 56 * effScale);
+        ctx.lineTo(sx + 240 * effScale, railY + 460 * effScale);
+        ctx.lineTo(sx - 240 * effScale, railY + 460 * effScale);
+        ctx.closePath();
+        ctx.fill();
+      });
+
+    } else if (resolvedStyle === 'warm_lamp') {
+      // 8. WARM LAMP: Cosy indoor floor lamp with warm radial falloff
+      const lampX = cx;
+      const lampY = vCenter + 40 * effScale;
+
+      const warmGrad = ctx.createRadialGradient(lampX, lampY - 80 * effScale, 20 * effScale, lampX, lampY - 80 * effScale, 380 * effScale);
+      warmGrad.addColorStop(0, 'rgba(255, 248, 220, 1.0)');
+      warmGrad.addColorStop(0.18, 'rgba(255, 185, 80, 0.95)');
+      warmGrad.addColorStop(0.5, 'rgba(255, 140, 45, 0.50)');
+      warmGrad.addColorStop(0.8, 'rgba(245, 100, 20, 0.18)');
+      warmGrad.addColorStop(1, 'rgba(255, 100, 20, 0)');
+      ctx.fillStyle = warmGrad;
+      ctx.beginPath();
+      ctx.arc(lampX, lampY - 80 * effScale, 380 * effScale, 0, Math.PI * 2);
+      ctx.fill();
+
+      const shadeW = 140 * effScale;
+      const shadeH = 85 * effScale;
+      const shadeTopY = lampY - 120 * effScale;
+
+      ctx.fillStyle = '#0f1116';
+      ctx.beginPath();
+      ctx.moveTo(lampX - shadeW * 0.35, shadeTopY);
+      ctx.lineTo(lampX + shadeW * 0.35, shadeTopY);
+      ctx.lineTo(lampX + shadeW * 0.5, shadeTopY + shadeH);
+      ctx.lineTo(lampX - shadeW * 0.5, shadeTopY + shadeH);
       ctx.closePath();
       ctx.fill();
 
-    } else if (reflectionType === 'sunset_window') {
-      // PROFILE 5: Persianas Venecianas de Madera (Alto Contraste)
-      const slatW = 760 * effScale;
-      const slatX = cx - slatW / 2;
-      for (let i = 0; i < 11; i++) {
-        const sY = vCenter - 250 * effScale + i * 48 * effScale;
-        const sGrad = ctx.createLinearGradient(slatX, sY, slatX + slatW, sY);
-        sGrad.addColorStop(0, 'rgba(255, 255, 255, 0.80)');
-        sGrad.addColorStop(0.5, 'rgba(255, 252, 248, 1.0)');
-        sGrad.addColorStop(1, 'rgba(230, 225, 220, 0.60)');
-        ctx.fillStyle = sGrad;
-        ctx.fillRect(slatX, sY, slatW, 28 * effScale);
+      ctx.strokeStyle = '#0b0d11';
+      ctx.lineWidth = 6 * effScale;
+      ctx.beginPath();
+      ctx.moveTo(lampX, shadeTopY + shadeH);
+      ctx.lineTo(lampX, lampY + 280 * effScale);
+      ctx.stroke();
 
-        // Sharp Venetian Blind Shadow Cut
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.70)';
-        ctx.fillRect(slatX, sY + 28 * effScale, slatW, 12 * effScale);
-      }
-
-    } else if (reflectionType === 'art_gallery') {
-      // PROFILE 6: Focos de Galería Museo (Riel Cenital con 3 Focos Proyectores)
-      const lineY = vCenter - 130 * effScale;
-      const railW = 920 * effScale;
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
-      ctx.fillRect(cx - railW / 2, lineY, railW, 18 * effScale);
-
-      [-320 * effScale, 0, 320 * effScale].forEach((offset) => {
-        const spotX = cx + offset;
-        const spotGrad = ctx.createRadialGradient(spotX, lineY + 70 * effScale, 10, spotX, lineY + 70 * effScale, 220 * effScale);
-        spotGrad.addColorStop(0, 'rgba(255, 255, 255, 1.0)');
-        spotGrad.addColorStop(0.3, 'rgba(248, 248, 252, 0.75)');
-        spotGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
-        ctx.fillStyle = spotGrad;
-        ctx.beginPath();
-        ctx.arc(spotX, lineY + 70 * effScale, 220 * effScale, 0, Math.PI * 2);
-        ctx.fill();
-      });
+      ctx.lineWidth = 5 * effScale;
+      ctx.beginPath();
+      ctx.moveTo(lampX, lampY + 200 * effScale); ctx.lineTo(lampX - 90 * effScale, lampY + 280 * effScale);
+      ctx.moveTo(lampX, lampY + 200 * effScale); ctx.lineTo(lampX + 90 * effScale, lampY + 280 * effScale);
+      ctx.stroke();
     }
 
     ctx.restore();
   };
 
-  // Draw Primary and Seamless Wrap-Around Lightformers
+  const drawCeilingLightsAt = (cx: number) => {
+    if (ceilingLightsEnabled === undefined) return;
+
+    ctx.save();
+    const lampOffsets = [-420 * effScale, -140 * effScale, 140 * effScale, 420 * effScale];
+    const lampShadeH = 40 * effScale;
+    const lampShadeW = 55 * effScale;
+    const dropY = 170 * effScale;
+
+    // Color based on ceilingLightTemp: warm (#ffa845), neutral (#fff2e0), cool (#d8eaff)
+    let r = 255, g = 242, b = 224;
+    if (ceilingLightTemp === 'warm') {
+      r = 255; g = 168; b = 69;
+    } else if (ceilingLightTemp === 'cool') {
+      r = 216; g = 234; b = 255;
+    }
+
+    lampOffsets.forEach((offset) => {
+      const lx = cx + offset;
+
+      // 1. Ceiling Canopy Mount
+      ctx.fillStyle = '#141720';
+      ctx.fillRect(lx - 12 * effScale, 0, 24 * effScale, 14 * effScale);
+
+      // 2. Electrical Cord
+      ctx.strokeStyle = '#0a0c10';
+      ctx.lineWidth = Math.max(1.5, 2.5 * effScale);
+      ctx.beginPath();
+      ctx.moveTo(lx, 14 * effScale);
+      ctx.lineTo(lx, dropY);
+      ctx.stroke();
+
+      // 3. Dark Industrial Pendant Lamp Shade
+      ctx.fillStyle = '#0e1118';
+      ctx.beginPath();
+      ctx.moveTo(lx - lampShadeW * 0.25, dropY);
+      ctx.lineTo(lx + lampShadeW * 0.25, dropY);
+      ctx.lineTo(lx + lampShadeW * 0.5, dropY + lampShadeH);
+      ctx.lineTo(lx - lampShadeW * 0.5, dropY + lampShadeH);
+      ctx.closePath();
+      ctx.fill();
+
+      // Shade rim highlight
+      ctx.strokeStyle = '#1e2330';
+      ctx.lineWidth = Math.max(1, 1.5 * effScale);
+      ctx.stroke();
+
+      if (ceilingLightsEnabled) {
+        // Glowing bulb at bottom opening
+        const bulbY = dropY + lampShadeH;
+
+        // Downward glowing spot / falloff
+        const spotGrad = ctx.createRadialGradient(lx, bulbY, 6 * effScale, lx, bulbY, 200 * effScale);
+        spotGrad.addColorStop(0, 'rgba(255, 255, 255, 1.0)');
+        spotGrad.addColorStop(0.2, `rgba(${r}, ${g}, ${b}, 0.95)`);
+        spotGrad.addColorStop(0.55, `rgba(${r}, ${g}, ${b}, 0.40)`);
+        spotGrad.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
+        ctx.fillStyle = spotGrad;
+
+        ctx.beginPath();
+        ctx.arc(lx, bulbY + 30 * effScale, 200 * effScale, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Downward soft spotlight cone
+        const coneGrad = ctx.createLinearGradient(lx, bulbY, lx, bulbY + 280 * effScale);
+        coneGrad.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0.65)`);
+        coneGrad.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
+        ctx.fillStyle = coneGrad;
+        ctx.beginPath();
+        ctx.moveTo(lx - lampShadeW * 0.5, bulbY);
+        ctx.lineTo(lx + lampShadeW * 0.5, bulbY);
+        ctx.lineTo(lx + 140 * effScale, bulbY + 280 * effScale);
+        ctx.lineTo(lx - 140 * effScale, bulbY + 280 * effScale);
+        ctx.closePath();
+        ctx.fill();
+      }
+    });
+
+    ctx.restore();
+  };
+
+  // Draw Primary and Seamless Wrap-Around Lightformers & Ceiling Lights
   drawLightformerAt(uCenter);
-  if (uCenter - 400 * effScale < 0) drawLightformerAt(uCenter + 2048);
-  if (uCenter + 400 * effScale > 2048) drawLightformerAt(uCenter - 2048);
+  drawCeilingLightsAt(uCenter);
+  if (uCenter - 400 * effScale < 0) {
+    drawLightformerAt(uCenter + 2048);
+    drawCeilingLightsAt(uCenter + 2048);
+  }
+  if (uCenter + 400 * effScale > 2048) {
+    drawLightformerAt(uCenter - 2048);
+    drawCeilingLightsAt(uCenter - 2048);
+  }
 
   ctx.restore();
 
@@ -951,7 +1220,7 @@ export function renderWebGLRoomComposite(options: RenderWebGLRoomOptions): HTMLC
     thicknessCm = 1.0,
     zDistance = 0,
     lightMode = 'day',
-    reflectionType = 'studio_grid',
+    reflectionType = 'panoramic_window',
     reflectionAngleDeg = 0,
     reflectionIntensity = 0.2,
     reflectionScale = 1.0,
@@ -961,6 +1230,12 @@ export function renderWebGLRoomComposite(options: RenderWebGLRoomOptions): HTMLC
     weatherPreset,
     shelfContactShadow = false,
     wallHarmonization = 0.35,
+    ceilingLightsEnabled,
+    ceilingLightTemp = 'neutral',
+    sunIntensity = 100,
+    isWallAnchored,
+    wallCalibratedAngle,
+    wallCalibratedPitch,
     adjust = {},
     shadowPreset = 'parallel',
     shadowAngleDeg = 62,
@@ -1072,7 +1347,7 @@ export function renderWebGLRoomComposite(options: RenderWebGLRoomOptions): HTMLC
     keyLightPos = new THREE.Vector3(4, 7, 5);
   }
 
-  const keyLight = new THREE.DirectionalLight(keyLightColor, keyLightIntensity);
+  const keyLight = new THREE.DirectionalLight(keyLightColor, (sunIntensity / 100) * keyLightIntensity);
   keyLight.position.copy(keyLightPos);
   scene.add(keyLight);
 
@@ -1093,6 +1368,8 @@ export function renderWebGLRoomComposite(options: RenderWebGLRoomOptions): HTMLC
     weatherPreset,
     reflectionBrightness,
     reflectionContrast,
+    ceilingLightsEnabled,
+    ceilingLightTemp,
   });
   const envRenderTarget = pmremGenerator.fromEquirectangular(envTex);
   envTex.dispose();

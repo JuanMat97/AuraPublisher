@@ -46,6 +46,12 @@ export interface ProductConfigState {
   resinGloss: number;
   wallAngle: number;
   pitchDeg: number;
+  isWallAnchored?: boolean;
+  wallCalibratedAngle?: number;
+  wallCalibratedPitch?: number;
+  sunIntensity?: number;
+  ceilingLightsEnabled?: boolean;
+  ceilingLightTemp?: 'warm' | 'neutral' | 'cool';
   placementMode?: 'wall' | 'shelf';
   lightPos3D?: { x: number; y: number; z: number };
   lightSource3D?: { x: number; y: number; z: number };
@@ -352,7 +358,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     hasResina: true,
     finishId: 'epoxy_resina',
     lightMode: 'day',
-    reflectionType: 'studio_grid',
+    reflectionType: 'panoramic_window',
     reflectionDirection: 'center',
     reflectionAngleDeg: 0,
     reflectionIntensity: 0.2,
@@ -495,7 +501,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         hasResina: true,
         finishId: 'epoxy_resina',
         lightMode: 'day',
-        reflectionType: 'studio_grid',
+        reflectionType: 'panoramic_window',
         reflectionDirection: 'center',
         reflectionAngleDeg: 0,
         reflectionIntensity: 0.2,

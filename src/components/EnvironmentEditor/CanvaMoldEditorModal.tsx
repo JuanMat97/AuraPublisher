@@ -85,12 +85,29 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
   const [thicknessCm, setThicknessCm] = useState(pos?.thicknessCm ?? 1.0);
   const [zDistance, setZDistance] = useState(pos?.zDistance ?? 0);
 
+  // Independent 3D Wall Grid Calibration & Anchoring
+  const [isCalibratingWall, setIsCalibratingWall] = useState<boolean>(false);
+  const [isWallAnchored, setIsWallAnchored] = useState<boolean>(pos?.isWallAnchored ?? true);
+  const [wallCalibratedAngle, setWallCalibratedAngle] = useState<number>(
+    pos?.wallCalibratedAngle ?? pos?.wallAngle ?? 0
+  );
+  const [wallCalibratedPitch, setWallCalibratedPitch] = useState<number>(
+    pos?.wallCalibratedPitch ?? pos?.pitchDeg ?? 0
+  );
+
   // 3D Wall Perspective Grid Visibility
   const [showWallGrid, setShowWallGrid] = useState<boolean>(true);
 
   // Interactive 3D Light Sphere Gizmo position (screen-normalized coordinates { x, y, z })
   const [lightPos3D, setLightPos3D] = useState<{ x: number; y: number; z: number }>(
     pos?.lightPos3D ?? pos?.lightSource3D ?? { x: 0.75, y: 0.25, z: 1.0 }
+  );
+
+  // Sun Light & Industrial Ceiling Lighting Parameters (Rehydrated)
+  const [sunIntensity, setSunIntensity] = useState<number>(pos?.sunIntensity ?? 100);
+  const [ceilingLightsEnabled, setCeilingLightsEnabled] = useState<boolean>(pos?.ceilingLightsEnabled ?? true);
+  const [ceilingLightTemp, setCeilingLightTemp] = useState<'warm' | 'neutral' | 'cool'>(
+    pos?.ceilingLightTemp ?? 'neutral'
   );
 
   // Snapping Guidelines & Hover / Ctrl Interaction State
@@ -278,7 +295,10 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
       reflRough: number,
       reflBright: number,
       wallHarm: number,
-      curFinish: 'resina' | 'brillante' | 'mate'
+      curFinish: 'resina' | 'brillante' | 'mate',
+      sunInt: number,
+      cLightsEnabled: boolean,
+      cLightTemp: 'warm' | 'neutral' | 'cool'
     ) => {
       const { scene, frontMaterials, ambLight, keyLight, fillLight, pmremGenerator } = threeState.current;
       if (!scene) return;
@@ -293,6 +313,8 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
           intensity: Math.max(0, reflInt * (1 + reflBright / 50)),
           scale: reflScale,
           lightMode: effectiveLightMode,
+          ceilingLightsEnabled: cLightsEnabled,
+          ceilingLightTemp: cLightTemp,
         });
         if (threeState.current.currentEnvRenderTarget) {
           threeState.current.currentEnvRenderTarget.dispose();
@@ -338,28 +360,30 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
 
       // Weather lighting modifiers
       let ambIntensity = 0.4;
-      let keyIntensity = 1.4;
+      let baseKeyIntensity = 1.4;
       let fillIntensity = 0.5;
       let weatherColor = new THREE.Color(0xffffff);
 
       if (wPreset === 'sunset') {
         weatherColor = new THREE.Color(0xffd7a8);
         ambIntensity = 0.38;
-        keyIntensity = 1.5;
+        baseKeyIntensity = 1.5;
       } else if (wPreset === 'night') {
         weatherColor = new THREE.Color(0x90b8f8);
         ambIntensity = 0.22;
-        keyIntensity = 1.6;
+        baseKeyIntensity = 1.6;
         fillIntensity = 0.25;
       } else if (wPreset === 'sunny') {
         weatherColor = new THREE.Color(0xfffaed);
         ambIntensity = 0.5;
-        keyIntensity = 1.8;
+        baseKeyIntensity = 1.8;
       } else if (wPreset === 'cloudy') {
         weatherColor = new THREE.Color(0xecf2f8);
         ambIntensity = 0.58;
-        keyIntensity = 0.95;
+        baseKeyIntensity = 0.95;
       }
+
+      const keyIntensity = (sunInt / 100) * baseKeyIntensity;
 
       if (wallSample) {
         const neutralColor = weatherColor.clone();
@@ -784,7 +808,10 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
           reflectionRoughness,
           reflectionBrightness,
           wallHarmonization,
-          finishMode
+          finishMode,
+          sunIntensity,
+          ceilingLightsEnabled,
+          ceilingLightTemp
         );
 
         const renderLoop = () => {
@@ -818,32 +845,47 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
     const normY = -(centerY - 0.5) * bgH;
     const scaleFactor = scaleWidth / initialScale;
 
+    const effectiveWallAngle = isCalibratingWall
+      ? wallCalibratedAngle
+      : isWallAnchored
+      ? wallCalibratedAngle
+      : wallAngle;
+    const effectivePitch = isCalibratingWall
+      ? wallCalibratedPitch
+      : isWallAnchored
+      ? wallCalibratedPitch
+      : pitchAngle;
+
     // 3D Scene Mesh Position & 3-Axis Rotation with Physics Clamps (prevents wall penetration)
     const clampedZ = Math.max(0.01, 0.04 + Math.max(0, Math.min(8.0, zDistance)) / 100);
     artGroup.position.set(normX, normY, clampedZ);
     artGroup.scale.set(scaleFactor, scaleFactor, 1);
     artGroup.rotation.set(
-      -(pitchAngle * Math.PI) / 180,
-      (wallAngle * Math.PI) / 180,
+      -(effectivePitch * Math.PI) / 180,
+      (effectiveWallAngle * Math.PI) / 180,
       (rollAngle * Math.PI) / 180
     );
 
     shadowMesh.position.set(normX, normY, 0.01);
     shadowMesh.scale.set(scaleFactor, scaleFactor, 1);
     shadowMesh.rotation.set(
-      -(pitchAngle * Math.PI) / 180,
-      (wallAngle * Math.PI) / 180,
+      -(effectivePitch * Math.PI) / 180,
+      (effectiveWallAngle * Math.PI) / 180,
       (rollAngle * Math.PI) / 180
     );
 
     if (wallGridMesh) {
       wallGridMesh.position.set(normX, normY, 0.002);
       wallGridMesh.rotation.set(
-        -(pitchAngle * Math.PI) / 180,
-        (wallAngle * Math.PI) / 180,
+        -(effectivePitch * Math.PI) / 180,
+        (effectiveWallAngle * Math.PI) / 180,
         (rollAngle * Math.PI) / 180
       );
-      wallGridMesh.visible = showWallGrid;
+      wallGridMesh.visible = isCalibratingWall || showWallGrid;
+      if (wallGridMesh.material && 'opacity' in wallGridMesh.material) {
+        (wallGridMesh.material as THREE.LineBasicMaterial).opacity = isCalibratingWall ? 0.85 : 0.22;
+        (wallGridMesh.material as THREE.LineBasicMaterial).needsUpdate = true;
+      }
     }
 
     artGroup.updateMatrixWorld(true);
@@ -883,9 +925,23 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
       rc: projected[7],
       center: projected[8],
     });
-  }, [centerX, centerY, scaleWidth, wallAngle, pitchAngle, rollAngle, zDistance, initialScale, showWallGrid]);
+  }, [
+    centerX,
+    centerY,
+    scaleWidth,
+    wallAngle,
+    pitchAngle,
+    rollAngle,
+    zDistance,
+    initialScale,
+    showWallGrid,
+    isCalibratingWall,
+    isWallAnchored,
+    wallCalibratedAngle,
+    wallCalibratedPitch,
+  ]);
 
-  // Live Sync 3D KeyLight Position with Canvas Light Sphere Gizmo
+  // Live Sync 3D KeyLight Position & Sun Intensity with Canvas Light Sphere Gizmo
   useEffect(() => {
     const { keyLight, bgW, bgH } = threeState.current;
     if (keyLight) {
@@ -893,8 +949,9 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
       const lightWorldY = -(lightPos3D.y - 0.5) * bgH * 1.5;
       const lightWorldZ = Math.max(1.5, lightPos3D.z * 5.0);
       keyLight.position.set(lightWorldX, lightWorldY, lightWorldZ);
+      keyLight.intensity = (sunIntensity / 100) * 1.4;
     }
-  }, [lightPos3D]);
+  }, [lightPos3D, sunIntensity]);
 
   // Dynamic Geometry Thickness update
   useEffect(() => {
@@ -912,7 +969,10 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
       reflectionRoughness,
       reflectionBrightness,
       wallHarmonization,
-      finishMode
+      finishMode,
+      sunIntensity,
+      ceilingLightsEnabled,
+      ceilingLightTemp
     );
   }, [
     reflectionType,
@@ -924,6 +984,9 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
     reflectionBrightness,
     wallHarmonization,
     finishMode,
+    sunIntensity,
+    ceilingLightsEnabled,
+    ceilingLightTemp,
     updateEnvironmentLighting,
   ]);
 
@@ -1087,40 +1150,40 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
       setCenterY(Math.min(Math.max(rawY, 0.05), 0.95));
     } else if (dragTarget === 'topCenter') {
       // Celestial Midpoint Pins + Ctrl: Aplanes/tilts frame (pitch), strictly locking wallAngle (yaw)
-      if (isCtrl) {
-        const newPitch = Math.max(-75, Math.min(75, Math.round(dragStart.current.origPitch - deltaY * 150)));
-        setPitchAngle(newPitch);
-      } else {
-        const newPitch = Math.max(-30, Math.min(30, Math.round(dragStart.current.origPitch - deltaY * 100)));
-        setPitchAngle(newPitch);
+      const newPitch = isCtrl
+        ? Math.max(-75, Math.min(75, Math.round(dragStart.current.origPitch - deltaY * 150)))
+        : Math.max(-30, Math.min(30, Math.round(dragStart.current.origPitch - deltaY * 100)));
+      if (isCalibratingWall) {
+        setWallCalibratedPitch(newPitch);
       }
+      setPitchAngle(newPitch);
     } else if (dragTarget === 'bottomCenter') {
       // Celestial Midpoint Pins + Ctrl: Aplanes/tilts frame (pitch), strictly locking wallAngle (yaw)
-      if (isCtrl) {
-        const newPitch = Math.max(-75, Math.min(75, Math.round(dragStart.current.origPitch + deltaY * 150)));
-        setPitchAngle(newPitch);
-      } else {
-        const newPitch = Math.max(-30, Math.min(30, Math.round(dragStart.current.origPitch + deltaY * 100)));
-        setPitchAngle(newPitch);
+      const newPitch = isCtrl
+        ? Math.max(-75, Math.min(75, Math.round(dragStart.current.origPitch + deltaY * 150)))
+        : Math.max(-30, Math.min(30, Math.round(dragStart.current.origPitch + deltaY * 100)));
+      if (isCalibratingWall) {
+        setWallCalibratedPitch(newPitch);
       }
+      setPitchAngle(newPitch);
     } else if (dragTarget === 'leftCenter') {
       // Yaw adjustment strictly locking pitchAngle
-      if (isCtrl) {
-        const newAngle = Math.max(-85, Math.min(85, Math.round(dragStart.current.origAngle - deltaX * 160)));
-        setWallAngle(newAngle);
-      } else {
-        const newAngle = Math.max(-60, Math.min(60, Math.round(dragStart.current.origAngle - deltaX * 120)));
-        setWallAngle(newAngle);
+      const newAngle = isCtrl
+        ? Math.max(-85, Math.min(85, Math.round(dragStart.current.origAngle - deltaX * 160)))
+        : Math.max(-60, Math.min(60, Math.round(dragStart.current.origAngle - deltaX * 120)));
+      if (isCalibratingWall) {
+        setWallCalibratedAngle(newAngle);
       }
+      setWallAngle(newAngle);
     } else if (dragTarget === 'rightCenter') {
       // Yaw adjustment strictly locking pitchAngle
-      if (isCtrl) {
-        const newAngle = Math.max(-85, Math.min(85, Math.round(dragStart.current.origAngle + deltaX * 160)));
-        setWallAngle(newAngle);
-      } else {
-        const newAngle = Math.max(-60, Math.min(60, Math.round(dragStart.current.origAngle + deltaX * 120)));
-        setWallAngle(newAngle);
+      const newAngle = isCtrl
+        ? Math.max(-85, Math.min(85, Math.round(dragStart.current.origAngle + deltaX * 160)))
+        : Math.max(-60, Math.min(60, Math.round(dragStart.current.origAngle + deltaX * 120)));
+      if (isCalibratingWall) {
+        setWallCalibratedAngle(newAngle);
       }
+      setWallAngle(newAngle);
     } else if (['topLeft', 'topRight', 'bottomRight', 'bottomLeft'].includes(dragTarget)) {
       const centerPxX = (screenPins ? screenPins.center.x / 100 : centerX) * rect.width;
       const centerPxY = (screenPins ? screenPins.center.y / 100 : centerY) * rect.height;
@@ -1160,6 +1223,19 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
     setIsSnappedY(false);
   };
 
+  const handleToggleWallCalibration = () => {
+    if (isCalibratingWall) {
+      setIsCalibratingWall(false);
+      setIsWallAnchored(true);
+      setWallAngle(wallCalibratedAngle);
+      setPitchAngle(wallCalibratedPitch);
+    } else {
+      setIsCalibratingWall(true);
+      setIsWallAnchored(false);
+      setShowWallGrid(true);
+    }
+  };
+
   const handleAutoCenter = () => {
     setCenterX(0.5);
     setCenterY(0.32);
@@ -1169,6 +1245,10 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
     setZDistance(0);
     setPlacementMode('wall');
     setShadowContactOcclusion(40);
+    setWallCalibratedAngle(0);
+    setWallCalibratedPitch(0);
+    setIsCalibratingWall(false);
+    setIsWallAnchored(true);
   };
 
   const handlePlacementModeChange = (mode: 'wall' | 'shelf') => {
@@ -1192,6 +1272,9 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
     const halfW = scaleWidth / 2;
     const halfH = scaleWidth / artAspect / 2;
 
+    const finalWallAngle = isWallAnchored ? wallCalibratedAngle : wallAngle;
+    const finalPitchAngle = isWallAnchored ? wallCalibratedPitch : pitchAngle;
+
     const updatedEnv: EnvironmentScene = {
       ...environment,
       positions: [
@@ -1200,13 +1283,19 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
           centerX,
           centerY,
           scaleWidth,
-          wallAngle,
-          pitchDeg: pitchAngle,
+          wallAngle: finalWallAngle,
+          pitchDeg: finalPitchAngle,
           rollAngle,
           rollDeg: rollAngle,
           thicknessCm,
           zDistance,
           placementMode,
+          isWallAnchored,
+          wallCalibratedAngle,
+          wallCalibratedPitch,
+          sunIntensity,
+          ceilingLightsEnabled,
+          ceilingLightTemp,
           lightPos3D,
           lightSource3D: lightPos3D,
           shadowBlur,
@@ -1256,14 +1345,20 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
       placementMode,
       lightPos3D,
       lightSource3D: lightPos3D,
-      wallAngle,
-      pitchDeg: pitchAngle,
+      wallAngle: finalWallAngle,
+      pitchDeg: finalPitchAngle,
       reflectionAngleDeg,
       reflectionIntensity,
       reflectionScale,
       reflectionRoughness,
       reflectionType,
       wallHarmonization,
+      isWallAnchored,
+      wallCalibratedAngle,
+      wallCalibratedPitch,
+      sunIntensity,
+      ceilingLightsEnabled,
+      ceilingLightTemp,
       temperature,
       tint,
       brightness,
@@ -1922,45 +2017,118 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                   paddingRight: '2px',
                 }}
               >
-                {/* 0. Grilla de Pared 3D en Profundidad Toggle */}
+                {/* 0. Sección Calibración de Plano de Pared con Grilla 3D & Anclaje */}
                 <div
                   style={{
-                    background: 'rgba(56, 189, 248, 0.06)',
-                    padding: '10px 14px',
+                    background: isCalibratingWall ? 'rgba(56, 189, 248, 0.10)' : 'rgba(255, 255, 255, 0.03)',
+                    padding: '12px 14px',
                     borderRadius: '12px',
-                    border: '1px solid rgba(56, 189, 248, 0.2)',
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
+                    border: isCalibratingWall ? '1.5px solid #38bdf8' : '1px solid rgba(255, 255, 255, 0.08)',
+                    transition: 'all 0.2s ease',
                   }}
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <Grid size={14} color="#38bdf8" />
-                    <div>
-                      <span style={{ fontSize: '11px', fontWeight: 700, color: '#ffffff', display: 'block' }}>
-                        Grilla 3D de Pared
-                      </span>
-                      <span style={{ fontSize: '9.5px', color: '#94a3b8' }}>
-                        Plano guía de perspectiva en pared
-                      </span>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <Grid size={15} color={isCalibratingWall ? '#38bdf8' : '#94a3b8'} />
+                      <div>
+                        <span style={{ fontSize: '11px', fontWeight: 700, color: '#ffffff', display: 'block' }}>
+                          📐 Calibración de Plano de Pared
+                        </span>
+                        <span style={{ fontSize: '9.5px', color: isWallAnchored && !isCalibratingWall ? '#4ade80' : '#94a3b8' }}>
+                          {isCalibratingWall
+                            ? 'Ajustando perspectiva 3D de la pared'
+                            : isWallAnchored
+                            ? '🔒 Pared Anclada (Orientación fija)'
+                            : '🔓 Pared libre'}
+                        </span>
+                      </div>
                     </div>
+                    <button
+                      onClick={handleToggleWallCalibration}
+                      style={{
+                        padding: '6px 12px',
+                        borderRadius: '8px',
+                        fontSize: '11px',
+                        fontWeight: 700,
+                        background: isCalibratingWall ? '#38bdf8' : 'rgba(56, 189, 248, 0.15)',
+                        border: '1px solid #38bdf8',
+                        color: isCalibratingWall ? '#040d1a' : '#38bdf8',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        boxShadow: isCalibratingWall ? '0 0 12px rgba(56, 189, 248, 0.5)' : 'none',
+                        transition: 'all 0.15s ease',
+                      }}
+                    >
+                      <span>{isCalibratingWall ? '🔒 Fijar y Anclar Pared' : '📐 Calibrar Plano de Pared'}</span>
+                    </button>
                   </div>
-                  <button
-                    onClick={() => setShowWallGrid(!showWallGrid)}
-                    style={{
-                      padding: '4px 10px',
-                      borderRadius: '6px',
-                      fontSize: '10px',
-                      fontWeight: 700,
-                      background: showWallGrid ? '#38bdf8' : 'rgba(255, 255, 255, 0.08)',
-                      border: 'none',
-                      color: showWallGrid ? '#040d1a' : '#94a3b8',
-                      cursor: 'pointer',
-                      transition: 'all 0.15s ease',
-                    }}
-                  >
-                    {showWallGrid ? 'ACTIVADA' : 'OCULTA'}
-                  </button>
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: isCalibratingWall ? '10px' : '0' }}>
+                    <span style={{ fontSize: '10px', color: '#94a3b8' }}>
+                      {isCalibratingWall
+                        ? 'Alinea la grilla con las aristas reales de la pared en la imagen'
+                        : 'Desliza el cuadro libremente sobre la pared calibrada'}
+                    </span>
+                    <button
+                      onClick={() => setShowWallGrid(!showWallGrid)}
+                      style={{
+                        padding: '3px 8px',
+                        borderRadius: '5px',
+                        fontSize: '9.5px',
+                        fontWeight: 600,
+                        background: showWallGrid ? 'rgba(56, 189, 248, 0.2)' : 'rgba(255, 255, 255, 0.05)',
+                        border: '1px solid rgba(255, 255, 255, 0.08)',
+                        color: showWallGrid ? '#38bdf8' : '#94a3b8',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Grilla: {showWallGrid ? 'ON' : 'OFF'}
+                    </button>
+                  </div>
+
+                  {isCalibratingWall && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', paddingTop: '8px', borderTop: '1px solid rgba(56, 189, 248, 0.2)' }}>
+                      <div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10.5px', color: '#ffffff', marginBottom: '2px' }}>
+                          <span>Ángulo Horizontal de Pared (Yaw)</span>
+                          <span style={{ fontWeight: 700, color: '#38bdf8' }}>{wallCalibratedAngle > 0 ? `+${wallCalibratedAngle}°` : `${wallCalibratedAngle}°`}</span>
+                        </div>
+                        <input
+                          type="range"
+                          min="-60"
+                          max="60"
+                          step="1"
+                          value={wallCalibratedAngle}
+                          onChange={(e) => {
+                            const v = parseInt(e.target.value);
+                            setWallCalibratedAngle(v);
+                            setWallAngle(v);
+                          }}
+                        />
+                      </div>
+
+                      <div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10.5px', color: '#ffffff', marginBottom: '2px' }}>
+                          <span>Inclinación Vertical de Pared (Pitch)</span>
+                          <span style={{ fontWeight: 700, color: '#38bdf8' }}>{wallCalibratedPitch > 0 ? `+${wallCalibratedPitch}°` : `${wallCalibratedPitch}°`}</span>
+                        </div>
+                        <input
+                          type="range"
+                          min="-75"
+                          max="75"
+                          step="1"
+                          value={wallCalibratedPitch}
+                          onChange={(e) => {
+                            const v = parseInt(e.target.value);
+                            setWallCalibratedPitch(v);
+                            setPitchAngle(v);
+                          }}
+                        />
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* 1. Modo de Colocación (Pared vs Repisa) */}
@@ -2781,7 +2949,83 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                   </div>
                 </div>
 
-                {/* 2. Brillo de Reflejo */}
+                {/* 2. Selector de 8 Ventanales Arquitectónicos */}
+                <div
+                  style={{
+                    background: 'rgba(255, 255, 255, 0.03)',
+                    padding: '12px 14px',
+                    borderRadius: '12px',
+                    border: '1px solid rgba(255, 255, 255, 0.08)',
+                  }}
+                >
+                  <span style={{ fontSize: '11px', fontWeight: 600, color: '#ffffff', display: 'block', marginBottom: '8px' }}>
+                    🪟 Ventanal y Fuente de Reflejo HDR
+                  </span>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '4px' }}>
+                    {REFLECTION_OPTIONS.map((opt) => {
+                      const isSel = reflectionType === opt.id;
+                      return (
+                        <button
+                          key={opt.id}
+                          onClick={() => setReflectionType(opt.id)}
+                          title={opt.description}
+                          style={{
+                            padding: '6px 2px',
+                            borderRadius: '8px',
+                            fontSize: '9.5px',
+                            fontWeight: isSel ? 700 : 500,
+                            border: isSel ? '1.5px solid var(--accent-primary)' : '1px solid rgba(255,255,255,0.06)',
+                            background: isSel ? 'var(--accent-primary-subtle)' : 'rgba(255,255,255,0.03)',
+                            color: isSel ? '#ffffff' : '#94a3b8',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            alignItems: 'center',
+                            gap: '2px',
+                            textAlign: 'center',
+                            boxShadow: isSel ? '0 0 10px var(--accent-primary-glow)' : 'none',
+                            transition: 'all 0.15s ease',
+                          }}
+                        >
+                          <span style={{ fontSize: '14px' }}>{opt.icon}</span>
+                          <span style={{ lineHeight: '1.1', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%' }}>
+                            {opt.name}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* 3. Intensidad Lumínica del Sol */}
+                <div
+                  style={{
+                    background: 'rgba(255, 255, 255, 0.03)',
+                    padding: '12px 14px',
+                    borderRadius: '12px',
+                    border: '1px solid rgba(255, 255, 255, 0.08)',
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#ffffff', marginBottom: '4px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <Sun size={13} color="#f59e0b" />
+                      <span style={{ fontWeight: 600 }}>☀️ Intensidad Lumínica del Sol</span>
+                    </div>
+                    <span style={{ fontWeight: 700, color: 'var(--accent-primary)' }}>
+                      {sunIntensity}%
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0"
+                    max="200"
+                    step="5"
+                    value={sunIntensity}
+                    onChange={(e) => setSunIntensity(parseInt(e.target.value))}
+                  />
+                </div>
+
+                {/* 4. Brillo de Reflejo */}
                 <div
                   style={{
                     background: 'rgba(255, 255, 255, 0.03)',
@@ -2806,7 +3050,81 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                   />
                 </div>
 
-                {/* 3. Tonalidad & Clima del Mockup */}
+                {/* 5. Luminaria de Techo Industrial */}
+                <div
+                  style={{
+                    background: 'rgba(255, 255, 255, 0.03)',
+                    padding: '12px 14px',
+                    borderRadius: '12px',
+                    border: '1px solid rgba(255, 255, 255, 0.08)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '8px',
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span style={{ fontSize: '13px' }}>💡</span>
+                      <span style={{ fontSize: '11px', fontWeight: 600, color: '#ffffff' }}>
+                        Luminaria de Techo Industrial
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => setCeilingLightsEnabled(!ceilingLightsEnabled)}
+                      style={{
+                        padding: '3px 10px',
+                        borderRadius: '6px',
+                        fontSize: '10px',
+                        fontWeight: 700,
+                        background: ceilingLightsEnabled ? 'var(--accent-primary)' : 'rgba(255, 255, 255, 0.08)',
+                        border: 'none',
+                        color: '#ffffff',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease',
+                      }}
+                    >
+                      {ceilingLightsEnabled ? 'Encendidas' : 'Apagadas'}
+                    </button>
+                  </div>
+
+                  {ceilingLightsEnabled && (
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '4px' }}>
+                      {[
+                        { id: 'warm', name: '🟠 Cálida', kelvin: '2700K' },
+                        { id: 'neutral', name: '⚪ Neutra', kelvin: '4000K' },
+                        { id: 'cool', name: '🔵 Fría', kelvin: '6500K' },
+                      ].map((t) => {
+                        const isSel = ceilingLightTemp === t.id;
+                        return (
+                          <button
+                            key={t.id}
+                            onClick={() => setCeilingLightTemp(t.id as any)}
+                            style={{
+                              padding: '6px 4px',
+                              borderRadius: '8px',
+                              fontSize: '10px',
+                              fontWeight: isSel ? 700 : 500,
+                              border: isSel ? '1.5px solid var(--accent-primary)' : '1px solid rgba(255,255,255,0.06)',
+                              background: isSel ? 'var(--accent-primary-subtle)' : 'rgba(255,255,255,0.03)',
+                              color: isSel ? '#ffffff' : '#94a3b8',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              alignItems: 'center',
+                              gap: '2px',
+                              transition: 'all 0.15s ease',
+                            }}
+                          >
+                            <span>{t.name}</span>
+                            <span style={{ fontSize: '8.5px', opacity: 0.7 }}>{t.kelvin}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* 6. Tonalidad & Clima del Mockup */}
                 <div
                   style={{
                     background: 'rgba(255, 255, 255, 0.03)',

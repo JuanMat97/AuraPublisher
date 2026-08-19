@@ -108,7 +108,7 @@ export const AuraStudioCanvas3D: React.FC<AuraStudioCanvas3DProps> = ({
   size = { w: 90, h: 50 },
   gap = 3,
   mood = 'day',
-  reflectionType = 'studio_grid',
+  reflectionType = 'panoramic_window',
   rotationY = 0,
 }) => {
   return (

@@ -4,7 +4,20 @@ export type FrameType = 'wrap_1cm';
 export type VinylFinish = 'mate' | 'brillante' | 'tornasolado';
 export type FinishType = VinylFinish | 'epoxy_resina' | 'satin';
 export type AmbientLightMode = 'day' | 'sunset' | 'night' | 'nordic_cold' | 'warm_home' | 'neon_gamer';
-export type ReflectionType = 'studio_grid' | 'art_gallery' | 'industrial_loft' | 'spotlight' | 'sunset_window' | 'crystal_minimal';
+export type ReflectionType =
+  | 'industrial_loft'
+  | 'panoramic_window'
+  | 'sunny_balcony'
+  | 'french_window'
+  | 'double_corner'
+  | 'skylight_zenith'
+  | 'gallery_track'
+  | 'warm_lamp'
+  | 'estudio'
+  | 'loft'
+  | 'galeria'
+  | 'ventanal_noche'
+  | 'modern_window';
 export type ReflectionDirection = 'left' | 'center' | 'right' | 'top';
 export type CanvaShadowPreset = 'none' | 'parallel' | 'glow' | 'outline' | 'curved' | 'floating' | 'angled' | 'bottom_drop';
 export type ShadowType = CanvaShadowPreset;
@@ -78,12 +91,14 @@ export interface ReflectionOption {
 }
 
 export const REFLECTION_OPTIONS: ReflectionOption[] = [
-  { id: 'studio_grid', name: 'Ventanal con Árboles', icon: '🌳', description: 'Ventanal piso-techo con follaje exterior y cielo HDR' },
-  { id: 'industrial_loft', name: 'Loft 9 Paneles', icon: '🏙️', description: 'Gran ventanal industrial con 9 cuadrantes de hierro' },
-  { id: 'crystal_minimal', name: 'Softbox Comercial', icon: '💎', description: 'Caja de luz de estudio fotográfico publicitario' },
-  { id: 'spotlight', name: 'Luz de Living', icon: '🛋️', description: 'Ventana lateral moderna con luz natural y silueta' },
-  { id: 'sunset_window', name: 'Persianas Venecianas', icon: '🌅', description: 'Rayos nítidos con persianas horizontales de madera' },
-  { id: 'art_gallery', name: 'Focos de Galería', icon: '🏛️', description: 'Riel cenital de focos proyectores de museo' },
+  { id: 'industrial_loft', name: 'Loft Industrial', icon: '🏭', description: 'Gran ventanal industrial con 9 cuadrantes de hierro' },
+  { id: 'panoramic_window', name: 'Ventanal Panorámico', icon: '🪟', description: 'Ventanal piso-techo con follaje exterior y cielo HDR' },
+  { id: 'sunny_balcony', name: 'Balcón Soleado', icon: '☀️', description: 'Luz intensa de balcón abierto con rayos directos' },
+  { id: 'french_window', name: 'Ventana Francesa', icon: '🏛️', description: 'Molduras clásicas arqueadas con luz difusa suave' },
+  { id: 'double_corner', name: 'Esquina Doble Altura', icon: '🏢', description: 'Ventanal en esquina de dos caras con luz cruzada' },
+  { id: 'skylight_zenith', name: 'Tragaluz Cenital', icon: '🌌', description: 'Apertura en el techo con proyección cenital' },
+  { id: 'gallery_track', name: 'Riel Spot Galería', icon: '🎨', description: 'Riel de focos proyectores directos de museo' },
+  { id: 'warm_lamp', name: 'Lámpara Cálida', icon: '🛋️', description: 'Luz cálida de lámpara de pie y ambiente hogareño' },
 ];
 
 export const REFLECTION_DIRECTIONS: Array<{ id: ReflectionDirection; name: string; icon: string; angle: number }> = [
@@ -152,6 +167,16 @@ export interface CanvaMoldConfig {
   shelfContactShadow?: boolean;
   gapCm?: number;
   panelCount?: number;
+
+  // Independent 3D Wall Grid & Calibration
+  isWallAnchored?: boolean;
+  wallCalibratedAngle?: number;
+  wallCalibratedPitch?: number;
+
+  // Sun Light & Industrial Ceiling Lighting
+  sunIntensity?: number;
+  ceilingLightsEnabled?: boolean;
+  ceilingLightTemp?: 'warm' | 'neutral' | 'cool';
 
   // Complete Canva Image Adjustment
   adjust?: CanvaImageAdjustOptions;
