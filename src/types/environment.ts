@@ -53,6 +53,7 @@ export interface MockupPosition {
   shadowPreset?: import('./catalog').CanvaShadowPreset;
   shadowStyleIntensity?: number;
   shadowAngleDeg?: number;
+  shadowDistance?: number;
   shadowContactOcclusion?: number;
   temperature?: number;
   tint?: number;

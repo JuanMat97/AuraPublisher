@@ -52,6 +52,8 @@ type DragTarget =
   | 'bottomLeft'
   | 'topCenter'
   | 'bottomCenter'
+  | 'leftCenter'
+  | 'rightCenter'
   | null;
 
 export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ environment, onClose }) => {
@@ -76,10 +78,12 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
   const [thicknessCm, setThicknessCm] = useState(pos?.thicknessCm ?? 1.0);
   const [zDistance, setZDistance] = useState(pos?.zDistance ?? 0);
 
-  // Snapping Guidelines State
+  // Snapping Guidelines & Hover / Ctrl Interaction State
   const [isSnappedX, setIsSnappedX] = useState(false);
   const [isSnappedY, setIsSnappedY] = useState(false);
   const [isCtrlActive, setIsCtrlActive] = useState(false);
+  const [isHovered, setIsHovered] = useState(false);
+  const [hoveredTarget, setHoveredTarget] = useState<DragTarget>(null);
 
   // 2. Lighting & Reflection Parameters (Rehydrated)
   const [reflectionType, setReflectionType] = useState<ReflectionType>(
@@ -133,6 +137,7 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
   const [shadowIntensity, setShadowIntensity] = useState(
     pos?.shadowStyleIntensity ?? productConfig.shadowIntensity ?? 50
   );
+  const [shadowDistance, setShadowDistance] = useState(pos?.shadowDistance ?? 30);
   const [shadowAngleDeg, setShadowAngleDeg] = useState(
     pos?.shadowAngleDeg ?? 90 + (pos?.reflectionAngleDeg ?? productConfig.reflectionAngleDeg ?? 0) * 0.5
   );
@@ -150,7 +155,7 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
     origRoll: 0,
   });
 
-  // On-Screen Vector Pin Coordinates (7 Pins: 4 Corners + TopCenter + BottomCenter + Center)
+  // On-Screen Vector Pin Coordinates (9 Pins: 4 Corners + 4 Midpoints + Center)
   const [screenPins, setScreenPins] = useState<{
     tl: { x: number; y: number };
     tr: { x: number; y: number };
@@ -158,6 +163,8 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
     bl: { x: number; y: number };
     tc: { x: number; y: number };
     bc: { x: number; y: number };
+    lc: { x: number; y: number };
+    rc: { x: number; y: number };
     center: { x: number; y: number };
   } | null>(null);
 
@@ -671,6 +678,10 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
           blur: shadowBlur,
           intensity: shadowIntensity,
           wallAngleDeg: wallAngle,
+          pitchDeg: pitchAngle,
+          rollDeg: rollAngle,
+          zDistance,
+          shelfContactShadow: shadowContactOcclusion > 0,
           width: 1024,
           height: 1024,
         });
@@ -684,7 +695,7 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
           transparent: true,
           depthWrite: false,
         });
-        const shadowMesh = new THREE.Mesh(new THREE.PlaneGeometry(totalW * 1.8, totalH * 1.8), shadowMat);
+        const shadowMesh = new THREE.Mesh(new THREE.PlaneGeometry(totalW * 2.2, totalH * 2.2), shadowMat);
         scene.add(shadowMesh);
 
         const sample = sampleWallLighting(envImg, initialCenterX, initialCenterY, initialScale);
@@ -791,7 +802,9 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
       new THREE.Vector3(-halfW, -halfH, 0.005), // Bottom-Left (3)
       new THREE.Vector3(0, halfH, 0.005), // Top-Center (4)
       new THREE.Vector3(0, -halfH, 0.005), // Bottom-Center (5)
-      new THREE.Vector3(0, 0, 0.005), // Center (6)
+      new THREE.Vector3(-halfW, 0, 0.005), // Left-Center (6)
+      new THREE.Vector3(halfW, 0, 0.005), // Right-Center (7)
+      new THREE.Vector3(0, 0, 0.005), // Center (8)
     ];
 
     const projected = localCorners.map((pt) => {
@@ -810,7 +823,9 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
       bl: projected[3],
       tc: projected[4],
       bc: projected[5],
-      center: projected[6],
+      lc: projected[6],
+      rc: projected[7],
+      center: projected[8],
     });
   }, [centerX, centerY, scaleWidth, wallAngle, pitchAngle, rollAngle, zDistance, initialScale]);
 
@@ -859,18 +874,33 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
         shadowPreset,
         aspectRatio: artAspect,
         angleDeg: shadowAngleDeg,
-        distance: 30,
+        distance: shadowDistance,
         blur: shadowBlur,
         intensity: shadowIntensity,
         wallAngleDeg: wallAngle,
+        pitchDeg: pitchAngle,
+        rollDeg: rollAngle,
+        zDistance,
+        shelfContactShadow: shadowContactOcclusion > 0,
         width: 1024,
         height: 1024,
       });
       shadowTexture.needsUpdate = true;
     }
-  }, [shadowPreset, shadowAngleDeg, shadowBlur, shadowIntensity, wallAngle, shadowContactOcclusion]);
+  }, [
+    shadowPreset,
+    shadowAngleDeg,
+    shadowBlur,
+    shadowIntensity,
+    shadowDistance,
+    wallAngle,
+    pitchAngle,
+    rollAngle,
+    zDistance,
+    shadowContactOcclusion,
+  ]);
 
-  // Mouse Handlers with 7 Vector Pins + Ctrl Rotation (Roll)
+  // Mouse Handlers with 9 Vector Pins + Proportional Scaling + Celestial Midpoint Controls + Ctrl Modes
   const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!containerRef.current) return;
     const rect = containerRef.current.getBoundingClientRect();
@@ -882,6 +912,8 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
       const pinDist = (p: { x: number; y: number }) => Math.hypot(clickX * 100 - p.x, clickY * 100 - p.y);
       if (pinDist(screenPins.tc) < 6) hitTarget = 'topCenter';
       else if (pinDist(screenPins.bc) < 6) hitTarget = 'bottomCenter';
+      else if (pinDist(screenPins.lc) < 6) hitTarget = 'leftCenter';
+      else if (pinDist(screenPins.rc) < 6) hitTarget = 'rightCenter';
       else if (pinDist(screenPins.tl) < 6) hitTarget = 'topLeft';
       else if (pinDist(screenPins.tr) < 6) hitTarget = 'topRight';
       else if (pinDist(screenPins.br) < 6) hitTarget = 'bottomRight';
@@ -904,13 +936,31 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
   };
 
   const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!dragTarget || !containerRef.current) return;
+    if (!containerRef.current) return;
     const rect = containerRef.current.getBoundingClientRect();
     const curX = (e.clientX - rect.left) / rect.width;
     const curY = (e.clientY - rect.top) / rect.height;
 
+    if (!dragTarget) {
+      if (screenPins) {
+        const pinDist = (p: { x: number; y: number }) => Math.hypot(curX * 100 - p.x, curY * 100 - p.y);
+        if (pinDist(screenPins.tc) < 6) setHoveredTarget('topCenter');
+        else if (pinDist(screenPins.bc) < 6) setHoveredTarget('bottomCenter');
+        else if (pinDist(screenPins.lc) < 6) setHoveredTarget('leftCenter');
+        else if (pinDist(screenPins.rc) < 6) setHoveredTarget('rightCenter');
+        else if (pinDist(screenPins.tl) < 6) setHoveredTarget('topLeft');
+        else if (pinDist(screenPins.tr) < 6) setHoveredTarget('topRight');
+        else if (pinDist(screenPins.br) < 6) setHoveredTarget('bottomRight');
+        else if (pinDist(screenPins.bl) < 6) setHoveredTarget('bottomLeft');
+        else if (pinDist(screenPins.center) < 7) setHoveredTarget('center');
+        else setHoveredTarget(null);
+      }
+      return;
+    }
+
     const deltaX = curX - dragStart.current.x;
     const deltaY = curY - dragStart.current.y;
+    const isCtrl = e.ctrlKey || e.metaKey || isCtrlActive;
 
     if (dragTarget === 'center') {
       let rawX = dragStart.current.origX + deltaX;
@@ -937,18 +987,51 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
       setCenterX(Math.min(Math.max(rawX, 0.05), 0.95));
       setCenterY(Math.min(Math.max(rawY, 0.05), 0.95));
     } else if (dragTarget === 'topCenter') {
-      // Top Center pin: adjusts top pitch / leaning
-      const newPitch = Math.max(-30, Math.min(30, Math.round(dragStart.current.origPitch - deltaY * 100)));
-      setPitchAngle(newPitch);
+      if (isCtrl) {
+        // Ctrl + Drag: "Acostar objeto" extreme pitch angle (-75° to +75°)
+        const newPitch = Math.max(-75, Math.min(75, Math.round(dragStart.current.origPitch - deltaY * 150)));
+        setPitchAngle(newPitch);
+      } else {
+        // Normal Drag: Adjusts pitchAngle (-30° to +30°)
+        const newPitch = Math.max(-30, Math.min(30, Math.round(dragStart.current.origPitch - deltaY * 100)));
+        setPitchAngle(newPitch);
+      }
     } else if (dragTarget === 'bottomCenter') {
-      // Bottom Center pin: adjusts bottom pitch / shelf leaning forward
-      const newPitch = Math.max(-30, Math.min(30, Math.round(dragStart.current.origPitch + deltaY * 100)));
-      setPitchAngle(newPitch);
+      if (isCtrl) {
+        // Ctrl + Drag: "Acostar objeto" extreme pitch angle (-75° to +75°)
+        const newPitch = Math.max(-75, Math.min(75, Math.round(dragStart.current.origPitch + deltaY * 150)));
+        setPitchAngle(newPitch);
+      } else {
+        // Normal Drag: Adjusts pitchAngle (-30° to +30°)
+        const newPitch = Math.max(-30, Math.min(30, Math.round(dragStart.current.origPitch + deltaY * 100)));
+        setPitchAngle(newPitch);
+      }
+    } else if (dragTarget === 'leftCenter') {
+      if (isCtrl) {
+        // Ctrl + Drag: Planar perspective / extended yaw
+        const newAngle = Math.max(-85, Math.min(85, Math.round(dragStart.current.origAngle - deltaX * 160)));
+        setWallAngle(newAngle);
+      } else {
+        // Normal Drag: Adjusts wallAngle / yaw (-60° to +60°)
+        const newAngle = Math.max(-60, Math.min(60, Math.round(dragStart.current.origAngle - deltaX * 120)));
+        setWallAngle(newAngle);
+      }
+    } else if (dragTarget === 'rightCenter') {
+      if (isCtrl) {
+        // Ctrl + Drag: Planar perspective / extended yaw
+        const newAngle = Math.max(-85, Math.min(85, Math.round(dragStart.current.origAngle + deltaX * 160)));
+        setWallAngle(newAngle);
+      } else {
+        // Normal Drag: Adjusts wallAngle / yaw (-60° to +60°)
+        const newAngle = Math.max(-60, Math.min(60, Math.round(dragStart.current.origAngle + deltaX * 120)));
+        setWallAngle(newAngle);
+      }
     } else if (['topLeft', 'topRight', 'bottomRight', 'bottomLeft'].includes(dragTarget)) {
-      if (e.ctrlKey || e.metaKey || isCtrlActive) {
-        // Ctrl + Corner Drag: Adjusts rollAngle (Z-rotation roll)
-        const centerPxX = (screenPins ? screenPins.center.x / 100 : centerX) * rect.width;
-        const centerPxY = (screenPins ? screenPins.center.y / 100 : centerY) * rect.height;
+      const centerPxX = (screenPins ? screenPins.center.x / 100 : centerX) * rect.width;
+      const centerPxY = (screenPins ? screenPins.center.y / 100 : centerY) * rect.height;
+
+      if (isCtrl) {
+        // Ctrl + Corner Drag: Rotation in the same plane (Z-roll)
         const startMouseAngle = Math.atan2(
           dragStart.current.y * rect.height - centerPxY,
           dragStart.current.x * rect.width - centerPxX
@@ -958,17 +1041,19 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
         const newRoll = Math.max(-45, Math.min(45, Math.round(dragStart.current.origRoll + diffDeg)));
         setRollAngle(newRoll);
       } else {
-        // Normal Corner Drag: Adjusts scale & wallAngle (yaw)
-        if (dragTarget === 'topRight' || dragTarget === 'bottomRight') {
-          const newScale = Math.min(Math.max(dragStart.current.origScale + deltaX * 0.8, 0.05), 0.9);
+        // Normal Corner Drag: ONLY Scale (agrandar o achicar el cuadro proporcionalmente). Does NOT rotate.
+        const startDist = Math.hypot(
+          dragStart.current.x * rect.width - centerPxX,
+          dragStart.current.y * rect.height - centerPxY
+        );
+        const curDist = Math.hypot(
+          curX * rect.width - centerPxX,
+          curY * rect.height - centerPxY
+        );
+        if (startDist > 0) {
+          const scaleRatio = curDist / startDist;
+          const newScale = Math.min(Math.max(dragStart.current.origScale * scaleRatio, 0.05), 0.90);
           setScaleWidth(newScale);
-          const newAngle = Math.min(Math.max(dragStart.current.origAngle + deltaY * 120, -60), 60);
-          setWallAngle(Math.round(newAngle));
-        } else if (dragTarget === 'topLeft' || dragTarget === 'bottomLeft') {
-          const newScale = Math.min(Math.max(dragStart.current.origScale - deltaX * 0.8, 0.05), 0.9);
-          setScaleWidth(newScale);
-          const newAngle = Math.min(Math.max(dragStart.current.origAngle - deltaY * 120, -60), 60);
-          setWallAngle(Math.round(newAngle));
         }
       }
     }
@@ -1019,6 +1104,7 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
           shadowBlur,
           shadowStyleIntensity: shadowIntensity,
           shadowAngleDeg,
+          shadowDistance,
           shadowContactOcclusion,
           temperature,
           tint,
@@ -1173,10 +1259,15 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
           {/* Left Canvas with Interactive Vector Pins */}
           <div
             ref={containerRef}
+            onMouseEnter={() => setIsHovered(true)}
+            onMouseLeave={() => {
+              setIsHovered(false);
+              setHoveredTarget(null);
+              handleMouseUp();
+            }}
             onMouseDown={handleMouseDown}
             onMouseMove={handleMouseMove}
             onMouseUp={handleMouseUp}
-            onMouseLeave={handleMouseUp}
             style={{
               position: 'relative',
               background: '#040508',
@@ -1184,16 +1275,27 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
               overflow: 'hidden',
               border: '1px solid rgba(255, 255, 255, 0.08)',
               userSelect: 'none',
-              cursor:
-                dragTarget === 'center'
-                  ? 'grabbing'
-                  : dragTarget === 'topCenter' || dragTarget === 'bottomCenter'
-                  ? 'ns-resize'
-                  : dragTarget
-                  ? isCtrlActive
-                    ? 'alias'
-                    : 'crosshair'
-                  : 'grab',
+              cursor: (() => {
+                if (dragTarget) {
+                  if (isCtrlActive) return 'grabbing';
+                  if (dragTarget === 'center') return 'grabbing';
+                  if (dragTarget === 'topCenter' || dragTarget === 'bottomCenter') return 'ns-resize';
+                  if (dragTarget === 'leftCenter' || dragTarget === 'rightCenter') return 'ew-resize';
+                  if (dragTarget === 'topLeft' || dragTarget === 'bottomRight') return 'nwse-resize';
+                  if (dragTarget === 'topRight' || dragTarget === 'bottomLeft') return 'nesw-resize';
+                  return 'grabbing';
+                }
+                if (hoveredTarget) {
+                  if (isCtrlActive) return 'grab';
+                  if (hoveredTarget === 'center') return 'grab';
+                  if (hoveredTarget === 'topCenter' || hoveredTarget === 'bottomCenter') return 'ns-resize';
+                  if (hoveredTarget === 'leftCenter' || hoveredTarget === 'rightCenter') return 'ew-resize';
+                  if (hoveredTarget === 'topLeft' || hoveredTarget === 'bottomRight') return 'nwse-resize';
+                  if (hoveredTarget === 'topRight' || hoveredTarget === 'bottomLeft') return 'nesw-resize';
+                  return 'grab';
+                }
+                return isCtrlActive ? 'grab' : 'default';
+              })(),
             }}
           >
             <canvas
@@ -1206,282 +1308,339 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
               }}
             />
 
-            {/* Smart Snapping Vertical Guideline */}
-            {isSnappedX && (
-              <div
-                style={{
-                  position: 'absolute',
-                  left: '50%',
-                  top: 0,
-                  bottom: 0,
-                  width: '1.5px',
-                  background: '#de2367',
-                  boxShadow: '0 0 10px #de2367',
-                  pointerEvents: 'none',
-                  zIndex: 10,
-                }}
-              >
-                <span
-                  style={{
-                    position: 'absolute',
-                    top: '12px',
-                    left: '6px',
-                    background: '#de2367',
-                    color: '#ffffff',
-                    fontSize: '9px',
-                    fontWeight: 800,
-                    padding: '2px 6px',
-                    borderRadius: '4px',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  Centro Horizontal (X: 50%)
-                </span>
-              </div>
-            )}
-
-            {/* Smart Snapping Horizontal Guideline */}
-            {isSnappedY && (
-              <div
-                style={{
-                  position: 'absolute',
-                  top: `${centerY * 100}%`,
-                  left: 0,
-                  right: 0,
-                  height: '1.5px',
-                  background: '#de2367',
-                  boxShadow: '0 0 10px #de2367',
-                  pointerEvents: 'none',
-                  zIndex: 10,
-                }}
-              >
-                <span
-                  style={{
-                    position: 'absolute',
-                    left: '12px',
-                    top: '-18px',
-                    background: '#de2367',
-                    color: '#ffffff',
-                    fontSize: '9px',
-                    fontWeight: 800,
-                    padding: '2px 6px',
-                    borderRadius: '4px',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  Nivel de Pared Estándar
-                </span>
-              </div>
-            )}
-
-            {/* Active Ctrl Roll Rotation Badge */}
-            {(isCtrlActive || (dragTarget && dragTarget !== 'center' && dragTarget !== 'topCenter' && dragTarget !== 'bottomCenter' && isCtrlActive)) && (
-              <div
-                style={{
-                  position: 'absolute',
-                  top: '14px',
-                  left: '50%',
-                  transform: 'translateX(-50%)',
-                  background: 'rgba(222, 35, 103, 0.92)',
-                  backdropFilter: 'blur(8px)',
-                  color: '#ffffff',
-                  fontSize: '11px',
-                  fontWeight: 800,
-                  padding: '5px 12px',
-                  borderRadius: '20px',
-                  boxShadow: '0 4px 16px rgba(222, 35, 103, 0.5)',
-                  pointerEvents: 'none',
-                  zIndex: 20,
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                }}
-              >
-                <RotateCcw size={12} />
-                <span>Rotación Z: {rollAngle > 0 ? `+${rollAngle}°` : `${rollAngle}°`} (Ctrl activo)</span>
-              </div>
-            )}
-
-            {/* Vector Quad Polygon Outline */}
-            {screenPins && (
-              <svg
-                style={{
-                  position: 'absolute',
-                  top: 0,
-                  left: 0,
-                  width: '100%',
-                  height: '100%',
-                  pointerEvents: 'none',
-                }}
-              >
-                <polygon
-                  points={`${screenPins.tl.x}%,${screenPins.tl.y}% ${screenPins.tr.x}%,${screenPins.tr.y}% ${screenPins.br.x}%,${screenPins.br.y}% ${screenPins.bl.x}%,${screenPins.bl.y}%`}
-                  fill="rgba(222, 35, 103, 0.06)"
-                  stroke="#de2367"
-                  strokeWidth="1.5"
-                  strokeDasharray="4 4"
-                />
-              </svg>
-            )}
-
-            {/* Interactive Vector Pin Handles */}
-            {screenPins && (
-              <>
-                {/* 4 Corner Pins */}
-                <div
-                  title="Esquina: Arrastra para escala/ángulo. Mantén Ctrl para Rotación Z."
-                  style={{
-                    position: 'absolute',
-                    left: `${screenPins.tl.x}%`,
-                    top: `${screenPins.tl.y}%`,
-                    transform: 'translate(-50%, -50%)',
-                    width: '14px',
-                    height: '14px',
-                    borderRadius: '50%',
-                    background: '#de2367',
-                    border: '2px solid #ffffff',
-                    boxShadow: '0 0 10px #de2367',
-                    pointerEvents: 'none',
-                  }}
-                />
-                <div
-                  title="Esquina: Arrastra para escala/ángulo. Mantén Ctrl para Rotación Z."
-                  style={{
-                    position: 'absolute',
-                    left: `${screenPins.tr.x}%`,
-                    top: `${screenPins.tr.y}%`,
-                    transform: 'translate(-50%, -50%)',
-                    width: '14px',
-                    height: '14px',
-                    borderRadius: '50%',
-                    background: '#de2367',
-                    border: '2px solid #ffffff',
-                    boxShadow: '0 0 10px #de2367',
-                    pointerEvents: 'none',
-                  }}
-                />
-                <div
-                  title="Esquina: Arrastra para escala/ángulo. Mantén Ctrl para Rotación Z."
-                  style={{
-                    position: 'absolute',
-                    left: `${screenPins.br.x}%`,
-                    top: `${screenPins.br.y}%`,
-                    transform: 'translate(-50%, -50%)',
-                    width: '14px',
-                    height: '14px',
-                    borderRadius: '50%',
-                    background: '#de2367',
-                    border: '2px solid #ffffff',
-                    boxShadow: '0 0 10px #de2367',
-                    pointerEvents: 'none',
-                  }}
-                />
-                <div
-                  title="Esquina: Arrastra para escala/ángulo. Mantén Ctrl para Rotación Z."
-                  style={{
-                    position: 'absolute',
-                    left: `${screenPins.bl.x}%`,
-                    top: `${screenPins.bl.y}%`,
-                    transform: 'translate(-50%, -50%)',
-                    width: '14px',
-                    height: '14px',
-                    borderRadius: '50%',
-                    background: '#de2367',
-                    border: '2px solid #ffffff',
-                    boxShadow: '0 0 10px #de2367',
-                    pointerEvents: 'none',
-                  }}
-                />
-
-                {/* Top Center Pin (Inclinación Superior) */}
-                <div
-                  title="Pin Superior: Inclinación Vertical (Pitch)"
-                  style={{
-                    position: 'absolute',
-                    left: `${screenPins.tc.x}%`,
-                    top: `${screenPins.tc.y}%`,
-                    transform: 'translate(-50%, -50%)',
-                    width: '20px',
-                    height: '10px',
-                    borderRadius: '6px',
-                    background: '#38bdf8',
-                    border: '1.5px solid #ffffff',
-                    boxShadow: '0 0 8px #38bdf8',
-                    pointerEvents: 'none',
-                  }}
-                />
-
-                {/* Bottom Center Pin (Inclinación Inferior / Repisa) */}
-                <div
-                  title="Pin Inferior: Inclinación Repisa / Apoyo"
-                  style={{
-                    position: 'absolute',
-                    left: `${screenPins.bc.x}%`,
-                    top: `${screenPins.bc.y}%`,
-                    transform: 'translate(-50%, -50%)',
-                    width: '20px',
-                    height: '10px',
-                    borderRadius: '6px',
-                    background: '#38bdf8',
-                    border: '1.5px solid #ffffff',
-                    boxShadow: '0 0 8px #38bdf8',
-                    pointerEvents: 'none',
-                  }}
-                />
-
-                {/* Center Pin */}
-                <div
-                  style={{
-                    position: 'absolute',
-                    left: `${screenPins.center.x}%`,
-                    top: `${screenPins.center.y}%`,
-                    transform: 'translate(-50%, -50%)',
-                    width: '28px',
-                    height: '28px',
-                    borderRadius: '50%',
-                    background: 'rgba(222, 35, 103, 0.7)',
-                    backdropFilter: 'blur(4px)',
-                    border: '1.5px solid #de2367',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    color: '#ffffff',
-                    pointerEvents: 'none',
-                    boxShadow: '0 0 12px rgba(222, 35, 103, 0.6)',
-                  }}
-                >
-                  <Move size={13} />
-                </div>
-              </>
-            )}
-
-            {/* Bottom Tip Bar */}
+            {/* Auto-Hide Guidelines, Pins, Outline & Tips (visible on hover or drag) */}
             <div
               style={{
                 position: 'absolute',
-                bottom: '10px',
-                left: '12px',
-                right: '12px',
-                padding: '6px 14px',
-                borderRadius: '8px',
-                background: 'rgba(10, 12, 18, 0.88)',
-                backdropFilter: 'blur(10px)',
-                color: '#94a3b8',
-                fontSize: '11px',
-                display: 'flex',
-                justifyContent: 'space-between',
-                gap: '8px',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                pointerEvents: 'none',
+                opacity: isHovered || dragTarget !== null ? 1 : 0,
+                transition: 'opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
               }}
             >
-              <span>
-                📍 <strong>Centro</strong>: Mover
-              </span>
-              <span>
-                ↕️ <strong>Pines Sup/Inf</strong>: Inclinación (Pitch)
-              </span>
-              <span>
-                🔄 <strong>Ctrl + Esquinas</strong>: Rotación Z
-              </span>
+              {/* Smart Snapping Vertical Guideline */}
+              {isSnappedX && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    left: '50%',
+                    top: 0,
+                    bottom: 0,
+                    width: '1.5px',
+                    background: '#de2367',
+                    boxShadow: '0 0 10px #de2367',
+                    pointerEvents: 'none',
+                    zIndex: 10,
+                  }}
+                >
+                  <span
+                    style={{
+                      position: 'absolute',
+                      top: '12px',
+                      left: '6px',
+                      background: '#de2367',
+                      color: '#ffffff',
+                      fontSize: '9px',
+                      fontWeight: 800,
+                      padding: '2px 6px',
+                      borderRadius: '4px',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    Centro Horizontal (X: 50%)
+                  </span>
+                </div>
+              )}
+
+              {/* Smart Snapping Horizontal Guideline */}
+              {isSnappedY && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: `${centerY * 100}%`,
+                    left: 0,
+                    right: 0,
+                    height: '1.5px',
+                    background: '#de2367',
+                    boxShadow: '0 0 10px #de2367',
+                    pointerEvents: 'none',
+                    zIndex: 10,
+                  }}
+                >
+                  <span
+                    style={{
+                      position: 'absolute',
+                      left: '12px',
+                      top: '-18px',
+                      background: '#de2367',
+                      color: '#ffffff',
+                      fontSize: '9px',
+                      fontWeight: 800,
+                      padding: '2px 6px',
+                      borderRadius: '4px',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    Nivel de Pared Estándar
+                  </span>
+                </div>
+              )}
+
+              {/* Active Ctrl Action Badge */}
+              {isCtrlActive && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: '14px',
+                    left: '50%',
+                    transform: 'translateX(-50%)',
+                    background: 'rgba(222, 35, 103, 0.92)',
+                    backdropFilter: 'blur(8px)',
+                    color: '#ffffff',
+                    fontSize: '11px',
+                    fontWeight: 800,
+                    padding: '5px 12px',
+                    borderRadius: '20px',
+                    boxShadow: '0 4px 16px rgba(222, 35, 103, 0.5)',
+                    pointerEvents: 'none',
+                    zIndex: 20,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                  }}
+                >
+                  <RotateCcw size={12} />
+                  <span>
+                    {dragTarget === 'topCenter' || dragTarget === 'bottomCenter' || hoveredTarget === 'topCenter' || hoveredTarget === 'bottomCenter'
+                      ? `Acostar objeto: ${pitchAngle > 0 ? `+${pitchAngle}°` : `${pitchAngle}°`} (Ctrl activo)`
+                      : dragTarget === 'leftCenter' || dragTarget === 'rightCenter' || hoveredTarget === 'leftCenter' || hoveredTarget === 'rightCenter'
+                      ? `Perspectiva / Giro: ${wallAngle > 0 ? `+${wallAngle}°` : `${wallAngle}°`} (Ctrl activo)`
+                      : `Rotación Z: ${rollAngle > 0 ? `+${rollAngle}°` : `${rollAngle}°`} (Ctrl activo)`}
+                  </span>
+                </div>
+              )}
+
+              {/* Vector Quad Polygon Outline */}
+              {screenPins && (
+                <svg
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: '100%',
+                    height: '100%',
+                    pointerEvents: 'none',
+                  }}
+                >
+                  <polygon
+                    points={`${screenPins.tl.x}%,${screenPins.tl.y}% ${screenPins.tr.x}%,${screenPins.tr.y}% ${screenPins.br.x}%,${screenPins.br.y}% ${screenPins.bl.x}%,${screenPins.bl.y}%`}
+                    fill="rgba(222, 35, 103, 0.06)"
+                    stroke="#de2367"
+                    strokeWidth="1.5"
+                    strokeDasharray="4 4"
+                  />
+                </svg>
+              )}
+
+              {/* Interactive Vector Pin Handles */}
+              {screenPins && (
+                <>
+                  {/* 4 Corner Pins (Proportional Scale / Ctrl: Z-Rotation) */}
+                  <div
+                    title="Esquina: Arrastra para escalar proporcionalmente. Ctrl + Arrastre para Rotación Z."
+                    style={{
+                      position: 'absolute',
+                      left: `${screenPins.tl.x}%`,
+                      top: `${screenPins.tl.y}%`,
+                      transform: 'translate(-50%, -50%)',
+                      width: '14px',
+                      height: '14px',
+                      borderRadius: '50%',
+                      background: '#de2367',
+                      border: '2px solid #ffffff',
+                      boxShadow: '0 0 10px #de2367',
+                      pointerEvents: 'none',
+                    }}
+                  />
+                  <div
+                    title="Esquina: Arrastra para escalar proporcionalmente. Ctrl + Arrastre para Rotación Z."
+                    style={{
+                      position: 'absolute',
+                      left: `${screenPins.tr.x}%`,
+                      top: `${screenPins.tr.y}%`,
+                      transform: 'translate(-50%, -50%)',
+                      width: '14px',
+                      height: '14px',
+                      borderRadius: '50%',
+                      background: '#de2367',
+                      border: '2px solid #ffffff',
+                      boxShadow: '0 0 10px #de2367',
+                      pointerEvents: 'none',
+                    }}
+                  />
+                  <div
+                    title="Esquina: Arrastra para escalar proporcionalmente. Ctrl + Arrastre para Rotación Z."
+                    style={{
+                      position: 'absolute',
+                      left: `${screenPins.br.x}%`,
+                      top: `${screenPins.br.y}%`,
+                      transform: 'translate(-50%, -50%)',
+                      width: '14px',
+                      height: '14px',
+                      borderRadius: '50%',
+                      background: '#de2367',
+                      border: '2px solid #ffffff',
+                      boxShadow: '0 0 10px #de2367',
+                      pointerEvents: 'none',
+                    }}
+                  />
+                  <div
+                    title="Esquina: Arrastra para escalar proporcionalmente. Ctrl + Arrastre para Rotación Z."
+                    style={{
+                      position: 'absolute',
+                      left: `${screenPins.bl.x}%`,
+                      top: `${screenPins.bl.y}%`,
+                      transform: 'translate(-50%, -50%)',
+                      width: '14px',
+                      height: '14px',
+                      borderRadius: '50%',
+                      background: '#de2367',
+                      border: '2px solid #ffffff',
+                      boxShadow: '0 0 10px #de2367',
+                      pointerEvents: 'none',
+                    }}
+                  />
+
+                  {/* 4 Celestial Midpoint Pins (Cyan #38bdf8) */}
+                  {/* Top Center Pin (tc) */}
+                  <div
+                    title="Pin Superior: Inclinación Vertical (Pitch). Ctrl + Arrastre: Acostar objeto en repisa."
+                    style={{
+                      position: 'absolute',
+                      left: `${screenPins.tc.x}%`,
+                      top: `${screenPins.tc.y}%`,
+                      transform: 'translate(-50%, -50%)',
+                      width: '18px',
+                      height: '9px',
+                      borderRadius: '4px',
+                      background: '#38bdf8',
+                      border: '1.5px solid #ffffff',
+                      boxShadow: '0 0 8px #38bdf8',
+                      pointerEvents: 'none',
+                    }}
+                  />
+
+                  {/* Bottom Center Pin (bc) */}
+                  <div
+                    title="Pin Inferior: Inclinación Vertical (Pitch). Ctrl + Arrastre: Acostar objeto en repisa."
+                    style={{
+                      position: 'absolute',
+                      left: `${screenPins.bc.x}%`,
+                      top: `${screenPins.bc.y}%`,
+                      transform: 'translate(-50%, -50%)',
+                      width: '18px',
+                      height: '9px',
+                      borderRadius: '4px',
+                      background: '#38bdf8',
+                      border: '1.5px solid #ffffff',
+                      boxShadow: '0 0 8px #38bdf8',
+                      pointerEvents: 'none',
+                    }}
+                  />
+
+                  {/* Left Center Pin (lc) */}
+                  <div
+                    title="Pin Lateral Izquierdo: Ángulo de Pared (Yaw). Ctrl + Arrastre: Perspectiva planar."
+                    style={{
+                      position: 'absolute',
+                      left: `${screenPins.lc.x}%`,
+                      top: `${screenPins.lc.y}%`,
+                      transform: 'translate(-50%, -50%)',
+                      width: '9px',
+                      height: '18px',
+                      borderRadius: '4px',
+                      background: '#38bdf8',
+                      border: '1.5px solid #ffffff',
+                      boxShadow: '0 0 8px #38bdf8',
+                      pointerEvents: 'none',
+                    }}
+                  />
+
+                  {/* Right Center Pin (rc) */}
+                  <div
+                    title="Pin Lateral Derecho: Ángulo de Pared (Yaw). Ctrl + Arrastre: Perspectiva planar."
+                    style={{
+                      position: 'absolute',
+                      left: `${screenPins.rc.x}%`,
+                      top: `${screenPins.rc.y}%`,
+                      transform: 'translate(-50%, -50%)',
+                      width: '9px',
+                      height: '18px',
+                      borderRadius: '4px',
+                      background: '#38bdf8',
+                      border: '1.5px solid #ffffff',
+                      boxShadow: '0 0 8px #38bdf8',
+                      pointerEvents: 'none',
+                    }}
+                  />
+
+                  {/* Center Pin */}
+                  <div
+                    style={{
+                      position: 'absolute',
+                      left: `${screenPins.center.x}%`,
+                      top: `${screenPins.center.y}%`,
+                      transform: 'translate(-50%, -50%)',
+                      width: '28px',
+                      height: '28px',
+                      borderRadius: '50%',
+                      background: 'rgba(222, 35, 103, 0.75)',
+                      backdropFilter: 'blur(4px)',
+                      border: '1.5px solid #de2367',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: '#ffffff',
+                      pointerEvents: 'none',
+                      boxShadow: '0 0 12px rgba(222, 35, 103, 0.6)',
+                    }}
+                  >
+                    <Move size={13} />
+                  </div>
+                </>
+              )}
+
+              {/* Bottom Tip Bar */}
+              <div
+                style={{
+                  position: 'absolute',
+                  bottom: '10px',
+                  left: '12px',
+                  right: '12px',
+                  padding: '6px 14px',
+                  borderRadius: '8px',
+                  background: 'rgba(10, 12, 18, 0.88)',
+                  backdropFilter: 'blur(10px)',
+                  color: '#94a3b8',
+                  fontSize: '11px',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  gap: '8px',
+                }}
+              >
+                <span>
+                  📍 <strong>Centro</strong>: Mover
+                </span>
+                <span>
+                  ↔️/↕️ <strong>Pines Celestes</strong>: Inclinación / Pared (Ctrl: Acostar)
+                </span>
+                <span>
+                  ⤡ <strong>Esquinas</strong>: Escala proporcional (Ctrl: Rotación Z)
+                </span>
+              </div>
             </div>
           </div>
 
@@ -1614,18 +1773,19 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                   <input
                     type="range"
                     min="0.5"
-                    max="6.0"
+                    max="12.0"
                     step="0.1"
                     value={thicknessCm}
                     onChange={(e) => setThicknessCm(parseFloat(e.target.value))}
                     style={{ marginBottom: '8px' }}
                   />
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '4px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '4px' }}>
                     {[
                       { label: '1 cm', val: 1.0 },
                       { label: '2 cm', val: 2.0 },
                       { label: '3.5 cm', val: 3.5 },
-                      { label: '5 cm', val: 5.0 },
+                      { label: '6 cm', val: 6.0 },
+                      { label: '12 cm', val: 12.0 },
                     ].map((b) => (
                       <button
                         key={b.label}
@@ -1741,14 +1901,14 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                   </div>
                   <input
                     type="range"
-                    min="-30"
-                    max="30"
+                    min="-75"
+                    max="75"
                     step="1"
                     value={pitchAngle}
                     onChange={(e) => setPitchAngle(parseInt(e.target.value))}
                     style={{ marginBottom: '8px' }}
                   />
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '4px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '4px' }}>
                     <button
                       onClick={() => setPitchAngle(0)}
                       style={{
@@ -1797,6 +1957,21 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                       }}
                     >
                       -15º Abajo
+                    </button>
+                    <button
+                      onClick={() => setPitchAngle(60)}
+                      style={{
+                        padding: '4px',
+                        borderRadius: '6px',
+                        fontSize: '10px',
+                        fontWeight: 600,
+                        background: 'rgba(255,255,255,0.04)',
+                        color: '#ffffff',
+                        border: '1px solid rgba(255,255,255,0.08)',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Acostar (60º)
                     </button>
                   </div>
                 </div>
@@ -2600,47 +2775,11 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                 </div>
 
                 {shadowPreset !== 'none' && (
-                  <>
-                    {/* Sombra de Contacto en Repisa (Ambient Occlusion) */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                    {/* 1. Intensidad de Sombra (0% a 100%) */}
                     <div>
                       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '3px' }}>
-                        <span style={{ fontSize: '11px', color: '#ffffff' }}>
-                          Sombra de Contacto (Ambient Occlusion)
-                        </span>
-                        <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--accent-primary)' }}>
-                          {shadowContactOcclusion}%
-                        </span>
-                      </div>
-                      <input
-                        type="range"
-                        min="0"
-                        max="100"
-                        value={shadowContactOcclusion}
-                        onChange={(e) => setShadowContactOcclusion(parseInt(e.target.value))}
-                      />
-                    </div>
-
-                    {/* Desenfoque (Blur) */}
-                    <div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '3px' }}>
-                        <span style={{ fontSize: '11px', color: '#ffffff' }}>Suavizado de Sombra (Blur)</span>
-                        <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--accent-primary)' }}>
-                          {shadowBlur}
-                        </span>
-                      </div>
-                      <input
-                        type="range"
-                        min="0"
-                        max="100"
-                        value={shadowBlur}
-                        onChange={(e) => setShadowBlur(parseInt(e.target.value))}
-                      />
-                    </div>
-
-                    {/* Intensidad */}
-                    <div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '3px' }}>
-                        <span style={{ fontSize: '11px', color: '#ffffff' }}>Intensidad / Opacidad</span>
+                        <span style={{ fontSize: '11px', color: '#ffffff' }}>Intensidad de Sombra</span>
                         <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--accent-primary)' }}>
                           {shadowIntensity}%
                         </span>
@@ -2654,16 +2793,67 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                       />
                     </div>
 
-                    {/* Ángulo de Sombra */}
+                    {/* 2. Difuminación / Suavizado (Blur) (0% a 100%) */}
+                    <div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '3px' }}>
+                        <span style={{ fontSize: '11px', color: '#ffffff' }}>Difuminación / Suavizado (Blur)</span>
+                        <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--accent-primary)' }}>
+                          {shadowBlur <= 15 ? `${shadowBlur}% (Nítida)` : shadowBlur >= 65 ? `${shadowBlur}% (Difusa)` : `${shadowBlur}%`}
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        value={shadowBlur}
+                        onChange={(e) => setShadowBlur(parseInt(e.target.value))}
+                      />
+                    </div>
+
+                    {/* 3. Proyección / Distancia (0 a 100) */}
+                    <div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '3px' }}>
+                        <span style={{ fontSize: '11px', color: '#ffffff' }}>Proyección / Distancia</span>
+                        <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--accent-primary)' }}>
+                          {shadowDistance}
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        value={shadowDistance}
+                        onChange={(e) => setShadowDistance(parseInt(e.target.value))}
+                      />
+                    </div>
+
+                    {/* 4. Sombra de Contacto en Repisa (0% a 100%) */}
+                    <div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '3px' }}>
+                        <span style={{ fontSize: '11px', color: '#ffffff' }}>Sombra de Contacto en Repisa</span>
+                        <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--accent-primary)' }}>
+                          {shadowContactOcclusion}%
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        value={shadowContactOcclusion}
+                        onChange={(e) => setShadowContactOcclusion(parseInt(e.target.value))}
+                      />
+                    </div>
+
+                    {/* 5. Ángulo de Luz / Sombra (0° a 360°) */}
                     <div>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '3px' }}>
-                        <span style={{ fontSize: '11px', color: '#ffffff' }}>Ángulo de Proyección</span>
+                        <span style={{ fontSize: '11px', color: '#ffffff' }}>Ángulo de Luz / Sombra</span>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                           <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--accent-primary)' }}>
                             {Math.round(shadowAngleDeg)}º
                           </span>
                           <button
-                            onClick={() => setShadowAngleDeg(90 + reflectionAngleDeg * 0.5)}
+                            onClick={() => setShadowAngleDeg(Math.round((90 + reflectionAngleDeg * 0.5) % 360))}
                             title="Sincronizar automáticamente con el ventanal"
                             style={{
                               background: 'rgba(255,255,255,0.06)',
@@ -2688,7 +2878,7 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                         onChange={(e) => setShadowAngleDeg(parseInt(e.target.value))}
                       />
                     </div>
-                  </>
+                  </div>
                 )}
               </div>
             )}
