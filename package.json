@@ -22,6 +22,12 @@
     "win": {
       "target": [
         {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
           "target": "dir",
           "arch": [
             "x64"
