@@ -109,3 +109,56 @@ export const CANVA_SHADOW_OPTIONS: CanvaShadowOption[] = [
   { id: 'bottom_drop', name: 'Fondo', description: 'Sombra inferior directa' },
   { id: 'none', name: 'Ninguno', description: 'Sin sombra proyectada' },
 ];
+
+export interface CanvaImageAdjustOptions {
+  temperature?: number; // -50..50
+  tint?: number; // -50..50
+  brightness?: number; // -50..50
+  contrast?: number; // -50..50
+  highlights?: number; // -50..50
+  shadowsTone?: number; // -50..50
+  whites?: number; // -50..50
+  blacks?: number; // -50..50
+  hue?: number; // -180..180
+  saturation?: number; // -100..100
+  invert?: boolean;
+}
+
+export interface CanvaMoldConfig {
+  centerX?: number;
+  centerY?: number;
+  scaleWidth?: number;
+  fitMode?: 'contain' | 'cover';
+  vinylFinish?: VinylFinish;
+  hasResina?: boolean;
+  lightMode?: AmbientLightMode;
+  reflectionType?: ReflectionType;
+  reflectionDirection?: ReflectionDirection;
+  reflectionAngleDeg?: number;
+  reflectionIntensity?: number;
+  reflectionScale?: number;
+  reflectionRoughness?: number;
+  reflectionBrightness?: number;
+  reflectionContrast?: number;
+  weatherPreset?: string;
+  wallHarmonization?: number;
+  wallAngle?: number;
+  pitchDeg?: number;
+  rollDeg?: number;
+  thicknessCm?: number;
+  zDistance?: number;
+  shelfContactShadow?: boolean;
+  gapCm?: number;
+  panelCount?: number;
+
+  // Complete Canva Image Adjustment
+  adjust?: CanvaImageAdjustOptions;
+
+  // Canva-Style Shadows
+  shadowPreset?: CanvaShadowPreset;
+  shadowAngleDeg?: number;
+  shadowDistance?: number;
+  shadowBlur?: number;
+  shadowIntensity?: number;
+  shadowColor?: string;
+}

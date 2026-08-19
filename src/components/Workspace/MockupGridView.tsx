@@ -11,6 +11,8 @@ import { Check, CheckSquare, Square, UploadCloud, Sparkles, Image as ImageIcon, 
 
 const thumbnailCache = new Map<string, HTMLCanvasElement>();
 
+export const clearThumbnailCache = () => thumbnailCache.clear();
+
 const MockupCardPreview: React.FC<{
   env: EnvironmentScene;
   artworkPath?: string;
@@ -29,8 +31,10 @@ const MockupCardPreview: React.FC<{
     const canvas = canvasRef.current;
     if (!canvas) return;
 
+    const pos = env.positions[0];
+    const adjustKey = pos?.adjust ? JSON.stringify(pos.adjust) : 'default';
     const slotsKey = artworkSlots.map((s) => s?.filename || 'none').join('|');
-    const cacheKey = `${env.id}:${artworkPath || 'default'}:${slotsKey}:${setMode}:${vinylFinish}:${hasResina}:${lightMode}:${sizeId}`;
+    const cacheKey = `${env.id}:${pos?.wallAngle}:${pos?.pitchDeg}:${pos?.rollDeg}:${pos?.thicknessCm}:${pos?.zDistance}:${pos?.reflectionType}:${pos?.reflectionAngleDeg}:${pos?.reflectionIntensity}:${pos?.reflectionBrightness}:${pos?.reflectionContrast}:${pos?.shadowPreset}:${pos?.shadowBlur}:${pos?.shadowStyleIntensity}:${pos?.wallHarmonization}:${adjustKey}:${artworkPath || 'default'}:${slotsKey}:${setMode}:${vinylFinish}:${hasResina}:${lightMode}:${sizeId}`;
     if (thumbnailCache.has(cacheKey)) {
       const cached = thumbnailCache.get(cacheKey)!;
       canvas.width = cached.width;
@@ -64,7 +68,6 @@ const MockupCardPreview: React.FC<{
 
         if (!alive) return;
 
-        const pos = env.positions[0];
         const centerX = pos?.quad ? (pos.quad.topLeft.x + pos.quad.topRight.x) / 2 : 0.5;
         const centerY = pos?.quad ? (pos.quad.topLeft.y + pos.quad.bottomLeft.y) / 2 : 0.32;
         const scaleWidth = pos?.quad ? Math.abs(pos.quad.topRight.x - pos.quad.topLeft.x) : 0.42;
@@ -85,9 +88,20 @@ const MockupCardPreview: React.FC<{
             reflectionScale: pos?.reflectionScale ?? 1.0,
             reflectionRoughness: pos?.reflectionRoughness ?? 0.08,
             reflectionAngleDeg: pos?.reflectionAngleDeg ?? 0,
+            reflectionBrightness: pos?.reflectionBrightness,
+            reflectionContrast: pos?.reflectionContrast,
+            weatherPreset: pos?.weatherPreset,
             wallHarmonization: pos?.wallHarmonization ?? 0.35,
             wallAngle: pos?.wallAngle ?? 0,
             pitchDeg: pos?.pitchDeg ?? 0,
+            rollDeg: pos?.rollDeg ?? 0,
+            thicknessCm: pos?.thicknessCm ?? 1.0,
+            zDistance: pos?.zDistance ?? 0,
+            shelfContactShadow: pos?.shelfContactShadow,
+            shadowPreset: pos?.shadowPreset,
+            shadowBlur: pos?.shadowBlur,
+            shadowIntensity: pos?.shadowStyleIntensity,
+            adjust: pos?.adjust,
           },
           canvasWidth: 480,
           canvasHeight: 300,

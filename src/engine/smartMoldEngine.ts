@@ -1,39 +1,17 @@
-import { AmbientLightMode, ReflectionType, ReflectionDirection, CanvaShadowPreset, VinylFinish } from '../types/catalog';
-import { renderWebGLRoomComposite, CanvaImageAdjustOptions } from './webglRoomEngine';
+import {
+  AmbientLightMode,
+  ReflectionType,
+  ReflectionDirection,
+  CanvaShadowPreset,
+  VinylFinish,
+  CanvaMoldConfig,
+  CanvaImageAdjustOptions,
+} from '../types/catalog';
+import { renderWebGLRoomComposite } from './webglRoomEngine';
 
 export type MoldFitMode = 'contain' | 'cover';
 
-export interface SmartMoldConfig {
-  centerX: number;
-  centerY: number;
-  scaleWidth: number;
-  fitMode?: MoldFitMode;
-  vinylFinish?: VinylFinish;
-  hasResina?: boolean;
-  lightMode?: AmbientLightMode;
-  reflectionType?: ReflectionType;
-  reflectionDirection?: ReflectionDirection;
-  reflectionAngleDeg?: number;
-  reflectionIntensity?: number;
-  reflectionScale?: number;
-  reflectionRoughness?: number;
-  wallHarmonization?: number;
-  wallAngle?: number;
-  pitchDeg?: number;
-  gapCm?: number;
-
-  // Complete Canva Image Adjustment
-  adjust?: CanvaImageAdjustOptions;
-
-  // Canva-Style Shadows
-  shadowPreset?: CanvaShadowPreset;
-  shadowAngleDeg?: number;
-  shadowDistance?: number;
-  shadowBlur?: number;
-  shadowIntensity?: number;
-  shadowColor?: string;
-  panelCount?: number;
-}
+export type SmartMoldConfig = CanvaMoldConfig;
 
 export interface RenderSmartMoldOptions {
   envImage: HTMLImageElement;
@@ -67,6 +45,9 @@ export function renderSmartMoldComposite(options: RenderSmartMoldOptions): HTMLC
     scaleWidth: mold.scaleWidth ?? 0.42,
     wallAngleDeg: mold.wallAngle ?? 0,
     pitchDeg: mold.pitchDeg ?? 0,
+    rollDeg: mold.rollDeg ?? 0,
+    thicknessCm: mold.thicknessCm ?? 1.0,
+    zDistance: mold.zDistance ?? 0,
     lightMode: mold.lightMode ?? 'day',
     reflectionType: mold.reflectionType ?? 'studio_grid',
     reflectionDirection: mold.reflectionDirection ?? 'center',
@@ -74,6 +55,10 @@ export function renderSmartMoldComposite(options: RenderSmartMoldOptions): HTMLC
     reflectionIntensity: mold.reflectionIntensity ?? 0.2,
     reflectionScale: mold.reflectionScale ?? 1.0,
     reflectionRoughness: mold.reflectionRoughness ?? 0.012,
+    reflectionBrightness: mold.reflectionBrightness,
+    reflectionContrast: mold.reflectionContrast,
+    weatherPreset: mold.weatherPreset as any,
+    shelfContactShadow: mold.shelfContactShadow,
     wallHarmonization: mold.wallHarmonization ?? 0.35,
     adjust: mold.adjust,
     shadowPreset: mold.shadowPreset ?? 'parallel',

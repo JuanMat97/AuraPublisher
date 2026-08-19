@@ -1,7 +1,15 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three-stdlib';
-import { AmbientLightMode, ReflectionType, ReflectionDirection, CanvaShadowPreset } from '../types/catalog';
+import {
+  AmbientLightMode,
+  ReflectionType,
+  ReflectionDirection,
+  CanvaShadowPreset,
+  CanvaImageAdjustOptions,
+} from '../types/catalog';
 import { finishPresets, RESIN_OVERLAY } from '../components/configurador3d/finishPresets';
+
+export type { CanvaImageAdjustOptions };
 
 export function getReflectionTypeForEnvironment(category?: string): ReflectionType {
   if (category === 'galeria') return 'art_gallery';
@@ -48,20 +56,6 @@ export function getNeutralSurfaceSettings(
   };
 }
 
-export interface CanvaImageAdjustOptions {
-  temperature?: number; // -50..50
-  tint?: number; // -50..50
-  brightness?: number; // -50..50
-  contrast?: number; // -50..50
-  highlights?: number; // -50..50
-  shadowsTone?: number; // -50..50
-  whites?: number; // -50..50
-  blacks?: number; // -50..50
-  hue?: number; // -180..180
-  saturation?: number; // -100..100
-  invert?: boolean;
-}
-
 export interface RenderWebGLRoomOptions {
   roomImage: HTMLImageElement;
   artworkImage: HTMLImageElement;
@@ -76,6 +70,9 @@ export interface RenderWebGLRoomOptions {
   scaleWidth?: number; // 0.05..0.90 (default 0.42)
   wallAngleDeg?: number; // -60..60 degrees
   pitchDeg?: number; // -60..60 degrees
+  rollDeg?: number; // -180..180 degrees (Z-rotation, default 0)
+  thicknessCm?: number; // Frame depth in cm (default 1.0, range 0.5 to 6.0)
+  zDistance?: number; // Distance from wall in cm (default 0)
   resinGloss?: number; // 0..1 (default 0.85)
   lightMode?: AmbientLightMode;
   reflectionType?: ReflectionType;
@@ -84,6 +81,10 @@ export interface RenderWebGLRoomOptions {
   reflectionIntensity?: number; // 0..1
   reflectionScale?: number; // 0.5..2.0
   reflectionRoughness?: number; // 0.02..0.30
+  reflectionBrightness?: number; // -50..50
+  reflectionContrast?: number; // -50..50
+  weatherPreset?: 'morning' | 'warm_afternoon' | 'intimate_night' | 'sunny_contrast' | 'overcast_soft' | string;
+  shelfContactShadow?: boolean;
   wallHarmonization?: number; // 0..1 (default 0.35)
 
   // Complete Canva Image Adjustment
@@ -206,22 +207,81 @@ export function applyCanvaAdjustmentsToCanvas(
 }
 
 /**
+ * Generates wrapped canvas edge textures for the 4 sides of a frame panel.
+ * Extracts physical rim borders from the active artwork canvas.
+ */
+export function createWrappedEdgeTextures(
+  sourceCanvas: HTMLCanvasElement,
+  panelWidthCm: number = 60,
+  panelHeightCm: number = 80,
+  panelThicknessCm: number = 1.0,
+  maxAnisotropy: number = 16
+): THREE.CanvasTexture[] {
+  const W = sourceCanvas.width;
+  const H = sourceCanvas.height;
+  const horizStripPx = Math.max(4, Math.round((W * panelThicknessCm) / Math.max(panelWidthCm, 1)));
+  const vertStripPx = Math.max(4, Math.round((H * panelThicknessCm) / Math.max(panelHeightCm, 1)));
+
+  const mk = (sx: number, sy: number, sw: number, sh: number, dw: number, dh: number) => {
+    const c = document.createElement('canvas');
+    c.width = dw;
+    c.height = dh;
+    const ctx = c.getContext('2d');
+    if (ctx) {
+      ctx.drawImage(sourceCanvas, sx, sy, sw, sh, 0, 0, dw, dh);
+    }
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = maxAnisotropy;
+    tex.wrapS = THREE.ClampToEdgeWrapping;
+    tex.wrapT = THREE.ClampToEdgeWrapping;
+    tex.generateMipmaps = true;
+    tex.minFilter = THREE.LinearMipmapLinearFilter;
+    tex.magFilter = THREE.LinearFilter;
+    tex.needsUpdate = true;
+    return tex;
+  };
+
+  // Face index mapping for Three.js BoxGeometry / RoundedBoxGeometry:
+  // 0: +X (Right side edge)
+  // 1: -X (Left side edge)
+  // 2: +Y (Top edge)
+  // 3: -Y (Bottom edge)
+  return [
+    mk(W - horizStripPx, 0, horizStripPx, H, horizStripPx, 256), // Right
+    mk(0, 0, horizStripPx, H, horizStripPx, 256),                // Left
+    mk(0, 0, W, vertStripPx, 256, vertStripPx),                // Top
+    mk(0, H - vertStripPx, W, vertStripPx, 256, vertStripPx),  // Bottom
+  ];
+}
+
+export interface FrameShadowOptions {
+  shadowPreset?: CanvaShadowPreset;
+  aspectRatio: number;
+  angleDeg?: number;
+  distance?: number;
+  blur?: number;
+  intensity?: number;
+  wallAngleDeg?: number;
+  pitchDeg?: number;
+  rollDeg?: number;
+  zDistance?: number;
+  shelfContactShadow?: boolean;
+  width?: number;
+  height?: number;
+}
+
+/**
  * High-Definition Physically Anchored Frame Drop Shadow Generator.
- * 2-Layer Architecture: Contact Occlusion + Directional Wall Cast Shadow.
+ * Multi-Layer Architecture:
+ * - Layer 1: Ambient Contact Occlusion (tighter & crisper close to wall)
+ * - Layer 2: Soft Perimeter Shadow
+ * - Layer 3: Directional Wall Cast Drop Shadow (Lateral + Vertical projection)
+ * - Layer 4: Shelf Contact Ambient Occlusion (Darker and crisper on supporting bottom edge)
  */
 export function drawExactFrameShadowToContext(
   ctx: CanvasRenderingContext2D,
-  options: {
-    shadowPreset?: CanvaShadowPreset;
-    aspectRatio: number;
-    angleDeg?: number;
-    distance?: number;
-    blur?: number;
-    intensity?: number;
-    wallAngleDeg?: number;
-    width?: number;
-    height?: number;
-  }
+  options: FrameShadowOptions
 ) {
   const {
     shadowPreset = 'parallel',
@@ -231,6 +291,10 @@ export function drawExactFrameShadowToContext(
     blur = 30,
     intensity = 60,
     wallAngleDeg = 0,
+    pitchDeg = 0,
+    rollDeg = 0,
+    zDistance = 0,
+    shelfContactShadow = false,
     width = 1024,
     height = 1024,
   } = options;
@@ -241,9 +305,18 @@ export function drawExactFrameShadowToContext(
     return;
   }
 
+  const zFactor = Math.max(0, zDistance);
+  const distanceBlurMult = 1.0 + zFactor * 0.25;
+  const distanceAlphaMult = 1.0 / (1.0 + zFactor * 0.18);
+  const distanceOffsetMult = 1.0 + zFactor * 0.20;
+
+  const pitchTiltFactor = Math.abs(pitchDeg) / 30;
+  const tiltBlurAdd = pitchTiltFactor * 8;
+
   // Scale alpha down so 100% intensity is still a realistic soft shadow, not pitch black
-  const alpha = Math.max(0.0, Math.min(1.0, (intensity / 100))) * 0.6;
-  const blurPx = Math.max(4, (blur / 100) * 60);
+  const baseAlpha = Math.max(0.0, Math.min(1.0, (intensity / 100))) * 0.6;
+  const alpha = baseAlpha * distanceAlphaMult;
+  const blurPx = Math.max(4, (blur / 100) * 60 + tiltBlurAdd) * distanceBlurMult;
 
   const centerX = width / 2;
   const centerY = height / 2;
@@ -255,25 +328,30 @@ export function drawExactFrameShadowToContext(
   const frameX = centerX - frameW / 2;
   const frameY = centerY - frameH / 2;
 
-  // 1. LAYER 1: Ambient Contact Occlusion (very tight, dark)
-  ctx.save();
-  ctx.filter = 'blur(6px)';
-  ctx.fillStyle = `rgba(0, 0, 0, ${alpha * 0.8})`;
-  ctx.fillRect(frameX, frameY, frameW, frameH);
-  ctx.restore();
+  // 1. LAYER 1: Ambient Contact Occlusion (very tight, dark when on wall, falls off with zDistance)
+  if (zFactor < 5) {
+    ctx.save();
+    const contactBlur = Math.max(4, 6 + zFactor * 3);
+    const contactAlpha = alpha * Math.max(0.15, 0.85 - zFactor * 0.14);
+    ctx.filter = `blur(${contactBlur}px)`;
+    ctx.fillStyle = `rgba(0, 0, 0, ${contactAlpha})`;
+    ctx.fillRect(frameX, frameY, frameW, frameH);
+    ctx.restore();
+  }
 
   // 2. LAYER 2: Soft Perimeter Shadow
   ctx.save();
-  ctx.filter = `blur(15px)`;
-  ctx.fillStyle = `rgba(0, 0, 0, ${alpha * 0.5})`;
-  ctx.fillRect(frameX - 5, frameY - 5, frameW + 10, frameH + 10);
+  const perimBlur = Math.max(10, 15 * distanceBlurMult);
+  ctx.filter = `blur(${perimBlur}px)`;
+  ctx.fillStyle = `rgba(0, 0, 0, ${alpha * 0.45})`;
+  ctx.fillRect(frameX - 4, frameY - 4, frameW + 8, frameH + 8);
   ctx.restore();
 
-  // 3. LAYER 3: Directional Wall Cast Drop Shadow
+  // 3. LAYER 3: Directional Lateral + Vertical Wall Cast Drop Shadow
   const rad = (angleDeg * Math.PI) / 180;
-  const distFactor = (distance / 100);
-  const dropY = distFactor * 60; // Downward drop
-  const dropX = -Math.sin(rad) * (distFactor * 30) + Math.sin((wallAngleDeg * Math.PI) / 180) * 15;
+  const distFactor = (distance / 100) * distanceOffsetMult;
+  const dropX = -Math.cos(rad) * (distFactor * 45) + Math.sin((wallAngleDeg * Math.PI) / 180) * 20;
+  const dropY = Math.sin(rad) * (distFactor * 55) + Math.sin((pitchDeg * Math.PI) / 180) * 15;
 
   ctx.save();
   ctx.filter = `blur(${blurPx}px)`;
@@ -316,17 +394,43 @@ export function drawExactFrameShadowToContext(
   }
 
   ctx.restore();
+
+  // 4. LAYER 4: Shelf Contact Ambient Occlusion (Darker & crisper on bottom/supporting edge)
+  if (shelfContactShadow) {
+    ctx.save();
+    // 4a. Ultra-crisp contact crease along the bottom shelf edge
+    ctx.filter = 'blur(2px)';
+    ctx.fillStyle = `rgba(0, 0, 0, ${Math.min(1.0, alpha * 1.6)})`;
+    ctx.fillRect(frameX - frameW * 0.01, frameY + frameH - 1, frameW * 1.02, 3);
+
+    // 4b. Immediate shelf downward contact gradient
+    ctx.filter = 'blur(5px)';
+    const shelfGrad = ctx.createLinearGradient(centerX, frameY + frameH - 2, centerX, frameY + frameH + 24);
+    shelfGrad.addColorStop(0, `rgba(0, 0, 0, ${alpha * 1.2})`);
+    shelfGrad.addColorStop(0.35, `rgba(0, 0, 0, ${alpha * 0.65})`);
+    shelfGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.fillStyle = shelfGrad;
+    ctx.fillRect(frameX - frameW * 0.04, frameY + frameH - 2, frameW * 1.08, 26);
+
+    // 4c. Soft shelf ambient occlusion pool
+    ctx.filter = 'blur(10px)';
+    const shelfSpread = ctx.createRadialGradient(
+      centerX,
+      frameY + frameH + 4,
+      8,
+      centerX,
+      frameY + frameH + 4,
+      frameW * 0.6
+    );
+    shelfSpread.addColorStop(0, `rgba(0, 0, 0, ${alpha * 0.55})`);
+    shelfSpread.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.fillStyle = shelfSpread;
+    ctx.fillRect(frameX - frameW * 0.08, frameY + frameH - 4, frameW * 1.16, 32);
+    ctx.restore();
+  }
 }
 
-export function generateExactFrameShadowTexture(options: {
-  shadowPreset?: CanvaShadowPreset;
-  aspectRatio: number;
-  angleDeg?: number;
-  distance?: number;
-  blur?: number;
-  intensity?: number;
-  wallAngleDeg?: number;
-}): HTMLCanvasElement {
+export function generateExactFrameShadowTexture(options: FrameShadowOptions): HTMLCanvasElement {
   const canvas = document.createElement('canvas');
   canvas.width = 1024;
   canvas.height = 1024;
@@ -341,6 +445,9 @@ export interface RaytracingEquirectangularMapOptions {
   intensity?: number; // 0..1
   scale?: number; // 0.5..2.0
   lightMode?: AmbientLightMode;
+  weatherPreset?: 'morning' | 'warm_afternoon' | 'intimate_night' | 'sunny_contrast' | 'overcast_soft' | string;
+  reflectionBrightness?: number;
+  reflectionContrast?: number;
 }
 
 /**
@@ -353,6 +460,9 @@ export function generateRaytracingEquirectangularMap(options: RaytracingEquirect
     intensity = 1.0,
     scale = 1.0,
     lightMode = 'day',
+    weatherPreset,
+    reflectionBrightness = 0,
+    reflectionContrast = 0,
   } = options;
 
   const canvas = document.createElement('canvas');
@@ -700,12 +810,19 @@ export function renderWebGLRoomComposite(options: RenderWebGLRoomOptions): HTMLC
     scaleWidth = 0.42,
     wallAngleDeg = 0,
     pitchDeg = 0,
+    rollDeg = 0,
+    thicknessCm = 1.0,
+    zDistance = 0,
     lightMode = 'day',
     reflectionType = 'studio_grid',
     reflectionAngleDeg = 0,
     reflectionIntensity = 0.2,
     reflectionScale = 1.0,
     reflectionRoughness = 0.012,
+    reflectionBrightness = 0,
+    reflectionContrast = 0,
+    weatherPreset,
+    shelfContactShadow = false,
     wallHarmonization = 0.35,
     adjust = {},
     shadowPreset = 'parallel',
@@ -763,7 +880,7 @@ export function renderWebGLRoomComposite(options: RenderWebGLRoomOptions): HTMLC
   bgMesh.position.set(0, 0, -0.05);
   scene.add(bgMesh);
 
-  // 2. Intelligent Wall Light Harmonization (Extracts Room Ambience)
+  // 2. Intelligent Wall Light Harmonization & Weather Presets (Extracts Room Ambience)
   const wallSample = sampleWallLighting(roomImage, centerX, centerY, scaleWidth);
   const wallColor = new THREE.Color(wallSample.r, wallSample.g, wallSample.b);
   const neutralColor = new THREE.Color(0xffffff);
@@ -771,12 +888,32 @@ export function renderWebGLRoomComposite(options: RenderWebGLRoomOptions): HTMLC
   // Blend white ambient with room wall color temperature
   const ambColor = neutralColor.clone().lerp(wallColor, wallHarmonization * 0.5);
   const roomLightScale = 0.65 + wallSample.luminance * 0.7;
-  const finalAmbIntensity = 0.4 * (1 - wallHarmonization * 0.4) + (0.4 * roomLightScale * wallHarmonization * 0.4);
+  let finalAmbIntensity = 0.4 * (1 - wallHarmonization * 0.4) + (0.4 * roomLightScale * wallHarmonization * 0.4);
+  let keyLightColor = ambColor.clone();
+  let keyLightIntensity = 1.3 * (0.6 + 0.4 * roomLightScale);
+
+  if (weatherPreset === 'warm_afternoon') {
+    keyLightColor.lerp(new THREE.Color(0xffb040), 0.35);
+    keyLightIntensity *= 1.15;
+  } else if (weatherPreset === 'morning') {
+    keyLightColor.lerp(new THREE.Color(0xe0f2fe), 0.3);
+    finalAmbIntensity *= 1.1;
+  } else if (weatherPreset === 'intimate_night') {
+    keyLightColor.lerp(new THREE.Color(0xfef08a), 0.3);
+    finalAmbIntensity *= 0.65;
+    keyLightIntensity *= 0.85;
+  } else if (weatherPreset === 'sunny_contrast') {
+    keyLightIntensity *= 1.25;
+    finalAmbIntensity *= 0.85;
+  } else if (weatherPreset === 'overcast_soft') {
+    keyLightIntensity *= 0.85;
+    finalAmbIntensity *= 1.2;
+  }
 
   const ambientLight = new THREE.AmbientLight(ambColor, finalAmbIntensity);
   scene.add(ambientLight);
 
-  const keyLight = new THREE.DirectionalLight(ambColor, 1.3 * (0.6 + 0.4 * roomLightScale));
+  const keyLight = new THREE.DirectionalLight(keyLightColor, keyLightIntensity);
   keyLight.position.set(4, 7, 5);
   scene.add(keyLight);
 
@@ -794,6 +931,9 @@ export function renderWebGLRoomComposite(options: RenderWebGLRoomOptions): HTMLC
     intensity: reflectionIntensity,
     scale: reflectionScale,
     lightMode,
+    weatherPreset,
+    reflectionBrightness,
+    reflectionContrast,
   });
   const envRenderTarget = pmremGenerator.fromEquirectangular(envTex);
   envTex.dispose();
@@ -809,14 +949,17 @@ export function renderWebGLRoomComposite(options: RenderWebGLRoomOptions): HTMLC
   artTex.magFilter = THREE.LinearFilter;
   artTex.anisotropy = maxAniso;
 
-  // 5. 3D Artwork Mesh Setup
+  // 5. 3D Artwork Mesh Setup with Support for rollDeg, thicknessCm, and zDistance
   const group = new THREE.Group();
   const normX = (centerX - 0.5) * bgW;
   const normY = -(centerY - 0.5) * bgH;
-  group.position.set(normX, normY, 0.04);
+  const zDistCm = zDistance ?? 0;
+  const zDistM = zDistCm / 100;
+  group.position.set(normX, normY, 0.04 + zDistM);
 
-  group.rotation.y = (wallAngleDeg * Math.PI) / 180;
   group.rotation.x = -(pitchDeg * Math.PI) / 180;
+  group.rotation.y = (wallAngleDeg * Math.PI) / 180;
+  group.rotation.z = ((rollDeg ?? 0) * Math.PI) / 180;
 
   const totalW = bgW * scaleWidth;
 
@@ -828,7 +971,8 @@ export function renderWebGLRoomComposite(options: RenderWebGLRoomOptions): HTMLC
 
   const gapM = panelsCount > 1 ? (gapCm / 100) * 0.4 : 0;
   const singleW = (totalW - gapM * (panelsCount - 1)) / panelsCount;
-  const depthM = 0.009; // Slim 9mm profile (no chunky box)
+  const thickCm = Math.max(0.5, Math.min(6.0, thicknessCm ?? 1.0));
+  const depthM = thickCm / 100;
 
   const preset = finishPresets[finishType] || finishPresets.brillante;
   const p = hasResina ? { ...preset, ...RESIN_OVERLAY } : preset;
@@ -863,9 +1007,8 @@ export function renderWebGLRoomComposite(options: RenderWebGLRoomOptions): HTMLC
     specularIntensity: specularIntensity,
   });
 
-  const edgeMat = new THREE.MeshStandardMaterial({ color: 0x141416, roughness: 0.35, metalness: 0.1 });
   const backMat = new THREE.MeshStandardMaterial({ color: 0x0a0a0c, roughness: 0.9 });
-  const panelGeom = new RoundedBoxGeometry(singleW, totalH, depthM, 4, 0.001);
+  const panelGeom = new RoundedBoxGeometry(singleW, totalH, depthM, 4, Math.min(0.002, depthM * 0.1));
 
   const startX = -totalW / 2 + singleW / 2;
 
@@ -882,7 +1025,37 @@ export function renderWebGLRoomComposite(options: RenderWebGLRoomOptions): HTMLC
     pMat.map = pTex;
     pMat.emissiveMap = pTex;
 
-    const materials = [edgeMat, edgeMat, edgeMat, edgeMat, pMat, backMat];
+    // Generate wrapped edge textures for physical wrapped border rendering on all frames
+    let panelCanvas = gradedCanvas;
+    if (panelsCount > 1) {
+      const sliceW = Math.max(2, Math.floor(gradedCanvas.width / panelsCount));
+      const sliceH = gradedCanvas.height;
+      const sliceCanvas = document.createElement('canvas');
+      sliceCanvas.width = sliceW;
+      sliceCanvas.height = sliceH;
+      const sCtx = sliceCanvas.getContext('2d');
+      if (sCtx) {
+        sCtx.drawImage(gradedCanvas, i * sliceW, 0, sliceW, sliceH, 0, 0, sliceW, sliceH);
+      }
+      panelCanvas = sliceCanvas;
+    }
+
+    const singlePanelWCm = (artworkWidthCm || 60) / panelsCount;
+    const panelHCm = artworkHeightCm || 80;
+    const edgeTextures = createWrappedEdgeTextures(panelCanvas, singlePanelWCm, panelHCm, thickCm, maxAniso);
+    const edgeMaterials = edgeTextures.map(
+      (t) => new THREE.MeshStandardMaterial({ map: t, roughness: roughness ?? 0.45, metalness: 0.05 })
+    );
+
+    const materials = [
+      edgeMaterials[0], // +X (Right side edge)
+      edgeMaterials[1], // -X (Left side edge)
+      edgeMaterials[2], // +Y (Top edge)
+      edgeMaterials[3], // -Y (Bottom edge)
+      pMat,             // +Z (Front face)
+      backMat,          // -Z (Back face)
+    ];
+
     const mesh = new THREE.Mesh(panelGeom, materials);
     mesh.position.set(startX + i * (singleW + gapM), 0, 0);
     group.add(mesh);
@@ -899,6 +1072,10 @@ export function renderWebGLRoomComposite(options: RenderWebGLRoomOptions): HTMLC
     blur: shadowBlur,
     intensity: shadowIntensity,
     wallAngleDeg,
+    pitchDeg,
+    rollDeg,
+    zDistance: zDistCm,
+    shelfContactShadow,
   });
 
   const sTex = new THREE.CanvasTexture(shadowCanvas);
@@ -910,8 +1087,9 @@ export function renderWebGLRoomComposite(options: RenderWebGLRoomOptions): HTMLC
   });
   const shadowMesh = new THREE.Mesh(shadowGeom, shadowMat);
   shadowMesh.position.set(normX, normY, 0.003);
-  shadowMesh.rotation.y = group.rotation.y;
   shadowMesh.rotation.x = group.rotation.x;
+  shadowMesh.rotation.y = group.rotation.y;
+  shadowMesh.rotation.z = group.rotation.z;
   scene.add(shadowMesh);
 
   renderer.render(scene, camera);

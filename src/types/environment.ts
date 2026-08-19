@@ -12,7 +12,19 @@ export interface PerspectiveQuad {
 
 export type QuadPoints = PerspectiveQuad;
 
-export interface EnvironmentPosition {
+export type WeatherPreset =
+  | 'morning'
+  | 'warm_afternoon'
+  | 'intimate_night'
+  | 'sunny_contrast'
+  | 'overcast_soft'
+  | 'day'
+  | 'sunset'
+  | 'night'
+  | 'sunny'
+  | 'cloudy';
+
+export interface MockupPosition {
   id: string;
   name: string;
   quad: PerspectiveQuad;
@@ -23,16 +35,40 @@ export interface EnvironmentPosition {
   // Per-environment optical and spatial overrides. The product finish remains global.
   wallAngle?: number;
   pitchDeg?: number;
+  rollDeg?: number;
+  rollAngle?: number;
+  thicknessCm?: number;
+  zDistance?: number;
   reflectionType?: import('./catalog').ReflectionType;
   reflectionDirection?: import('./catalog').ReflectionDirection;
   reflectionAngleDeg?: number;
   reflectionIntensity?: number;
   reflectionScale?: number;
   reflectionRoughness?: number;
+  reflectionBrightness?: number;
+  reflectionContrast?: number;
+  weatherPreset?: WeatherPreset;
+  shelfContactShadow?: boolean;
   wallHarmonization?: number;
   shadowPreset?: import('./catalog').CanvaShadowPreset;
   shadowStyleIntensity?: number;
+  shadowAngleDeg?: number;
+  shadowContactOcclusion?: number;
+  temperature?: number;
+  tint?: number;
+  brightness?: number;
+  contrast?: number;
+  highlights?: number;
+  shadowsTone?: number;
+  whites?: number;
+  blacks?: number;
+  hue?: number;
+  saturation?: number;
+  invert?: boolean;
+  adjust?: import('./catalog').CanvaImageAdjustOptions;
 }
+
+export type EnvironmentPosition = MockupPosition;
 
 export interface EnvironmentScene {
   id: string;
