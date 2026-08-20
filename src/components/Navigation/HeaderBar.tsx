@@ -1,6 +1,6 @@
 import React from 'react';
-import { useAppStore } from '../../store/appStore';
-import { Folder, History, UploadCloud, RefreshCw, Check } from 'lucide-react';
+import { useAppStore, StudioView } from '../../store/appStore';
+import { Folder, History, UploadCloud, Check, Sparkles, Sliders } from 'lucide-react';
 import { processFileToSelectedImage } from '../../utils/imageLoader';
 
 interface HeaderBarProps {
@@ -8,17 +8,25 @@ interface HeaderBarProps {
   onOpenPresets?: () => void;
 }
 
-export const HeaderBar: React.FC<HeaderBarProps> = ({ onOpenHistory, onOpenPresets }) => {
+export const HeaderBar: React.FC<HeaderBarProps> = ({ onOpenHistory }) => {
   const {
     selectedImage,
     setSelectedImage,
     outputFolder,
     history,
+    activeView,
     currentView,
+    setActiveView,
     setCurrentView,
     currentStep,
     setCurrentStep,
   } = useAppStore();
+
+  const current = activeView || currentView || 'publisher';
+  const handleSelectView = (view: StudioView) => {
+    if (setActiveView) setActiveView(view);
+    else setCurrentView(view);
+  };
 
   const handleOpenImage = () => {
     if (window.electronAPI) {
@@ -50,165 +58,154 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({ onOpenHistory, onOpenPrese
 
   const handleHistoryClick = () => {
     if (onOpenHistory) onOpenHistory();
-    else setCurrentView('presets');
   };
 
   return (
-    <header style={{
-      height: '56px',
-      background: 'rgba(12, 15, 22, 0.75)',
-      backdropFilter: 'blur(24px) saturate(180%)',
-      borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      padding: '0 20px',
-      position: 'relative',
-      zIndex: 50,
-    }}>
-      {/* Brand */}
+    <header
+      style={{
+        height: '56px',
+        background: '#ffffff',
+        borderBottom: '1px solid #e2e8f0',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        padding: '0 20px',
+        position: 'relative',
+        zIndex: 50,
+        flexShrink: 0,
+      }}
+    >
+      {/* Left: Active View Breadcrumb / Title */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-        <div style={{
-          width: '32px',
-          height: '32px',
-          borderRadius: '10px',
-          background: 'linear-gradient(135deg, #de2367, #be185d)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          boxShadow: '0 4px 14px var(--accent-primary-glow)',
-        }}>
-          <span style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: '18px', color: '#ffffff' }}>
-            A
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span style={{ fontSize: '14px', fontWeight: 700, color: '#0f172a' }}>
+            {current === 'library' && 'Biblioteca de Diseños'}
+            {current === 'mockups' && 'Studio Mockups 3D'}
+            {current === 'publisher' && 'Publicador MercadoLibre'}
+            {current === 'pricing' && 'Gestor de Precios & Variantes'}
           </span>
-        </div>
 
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px' }}>
-          <span style={{ fontFamily: 'var(--font-display)', fontSize: '17px', fontWeight: 700, color: '#ffffff', letterSpacing: '-0.02em' }}>
-            AuraPublisher
-          </span>
-          <span style={{ fontSize: '9px', fontWeight: 800, color: 'var(--accent-primary)', letterSpacing: '0.08em' }}>
-            STUDIO PRO
-          </span>
+          {selectedImage ? (
+            <span className="pill pill-green" style={{ fontSize: '10px' }}>
+              <Check size={10} />
+              {selectedImage.filename.length > 24
+                ? selectedImage.filename.substring(0, 24) + '...'
+                : selectedImage.filename}
+            </span>
+          ) : (
+            <span className="pill pill-amber" style={{ fontSize: '10px' }}>
+              Sin obra activa
+            </span>
+          )}
         </div>
       </div>
 
-      {/* Center 4-Step Publication Workflow Stepper */}
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        background: 'rgba(0, 0, 0, 0.4)',
-        border: '1px solid rgba(255, 255, 255, 0.1)',
-        borderRadius: '12px',
-        padding: '3px 4px',
-        gap: '4px',
-      }}>
-        {/* Step 1: Cargar */}
+      {/* Center: Publication Workflow Stepper */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          background: '#f1f5f9',
+          border: '1px solid #e2e8f0',
+          borderRadius: '10px',
+          padding: '2px 4px',
+          gap: '2px',
+        }}
+      >
+        {/* Step 1: Biblioteca */}
         <button
-          onClick={handleOpenImage}
-          title={selectedImage ? `Obra: ${selectedImage.filename}` : 'Cargar obra principal'}
+          onClick={() => handleSelectView('library')}
           style={{
             display: 'flex',
             alignItems: 'center',
-            gap: '6px',
-            padding: '5px 10px',
-            borderRadius: '8px',
-            border: currentStep === 1 ? '1px solid var(--accent-primary)' : '1px solid transparent',
-            background: currentStep === 1 ? 'var(--accent-primary-subtle)' : selectedImage ? 'rgba(16, 185, 129, 0.1)' : 'transparent',
-            color: selectedImage ? '#34d399' : '#cbd5e1',
+            gap: '5px',
+            padding: '4px 10px',
+            borderRadius: '7px',
+            border: 'none',
+            background: current === 'library' ? '#ffffff' : 'transparent',
+            color: current === 'library' ? '#0284c7' : '#64748b',
+            boxShadow: current === 'library' ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
             fontSize: '11px',
-            fontWeight: 600,
+            fontWeight: current === 'library' ? 700 : 500,
             cursor: 'pointer',
           }}
         >
-          <UploadCloud size={12} color={selectedImage ? '#34d399' : 'currentColor'} />
-          <span>1. {selectedImage ? 'Cargado' : 'Cargar'}</span>
-          {selectedImage && <Check size={10} color="#34d399" />}
+          <span>1. Biblioteca</span>
         </button>
 
-        <span style={{ color: '#475569', fontSize: '10px' }}>›</span>
+        <span style={{ color: '#cbd5e1', fontSize: '10px' }}>›</span>
 
         {/* Step 2: Mockups */}
         <button
           onClick={() => {
             setCurrentStep(2);
-            setCurrentView('studio');
+            handleSelectView('mockups');
           }}
           style={{
             display: 'flex',
             alignItems: 'center',
-            gap: '6px',
-            padding: '5px 10px',
-            borderRadius: '8px',
-            border: currentStep === 2 && currentView === 'studio' ? '1px solid var(--accent-primary)' : '1px solid transparent',
-            background: currentStep === 2 && currentView === 'studio' ? 'var(--accent-primary-subtle)' : 'transparent',
-            color: currentStep === 2 && currentView === 'studio' ? '#ffffff' : '#94a3b8',
+            gap: '5px',
+            padding: '4px 10px',
+            borderRadius: '7px',
+            border: 'none',
+            background: current === 'mockups' ? '#ffffff' : 'transparent',
+            color: current === 'mockups' ? '#0284c7' : '#64748b',
+            boxShadow: current === 'mockups' ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
             fontSize: '11px',
-            fontWeight: 600,
+            fontWeight: current === 'mockups' ? 700 : 500,
             cursor: 'pointer',
           }}
         >
           <span>2. Mockups</span>
         </button>
 
-        <span style={{ color: '#475569', fontSize: '10px' }}>›</span>
+        <span style={{ color: '#cbd5e1', fontSize: '10px' }}>›</span>
 
-        {/* Step 3: Publicar */}
+        {/* Step 3: Publicador */}
         <button
           onClick={() => {
             setCurrentStep(3);
-            setCurrentView('publish');
+            handleSelectView('publisher');
           }}
           style={{
             display: 'flex',
             alignItems: 'center',
-            gap: '6px',
-            padding: '5px 10px',
-            borderRadius: '8px',
-            border: currentView === 'publish' ? '1px solid var(--accent-primary)' : '1px solid transparent',
-            background: currentView === 'publish' ? 'var(--accent-primary-subtle)' : 'transparent',
-            color: currentView === 'publish' ? '#ffffff' : '#94a3b8',
+            gap: '5px',
+            padding: '4px 10px',
+            borderRadius: '7px',
+            border: 'none',
+            background: current === 'publisher' ? '#ffffff' : 'transparent',
+            color: current === 'publisher' ? '#0284c7' : '#64748b',
+            boxShadow: current === 'publisher' ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
             fontSize: '11px',
-            fontWeight: 600,
+            fontWeight: current === 'publisher' ? 700 : 500,
             cursor: 'pointer',
           }}
         >
-          <span>3. Publicar</span>
-          <span style={{
-            fontSize: '8px',
-            fontWeight: 800,
-            padding: '1px 4px',
-            borderRadius: '4px',
-            background: 'rgba(222, 35, 103, 0.2)',
-            color: 'var(--accent-primary)',
-          }}>
-            ML
-          </span>
+          <span>3. Publicador ML</span>
         </button>
 
-        <span style={{ color: '#475569', fontSize: '10px' }}>›</span>
+        <span style={{ color: '#cbd5e1', fontSize: '10px' }}>›</span>
 
-        {/* Step 4: Exportar */}
+        {/* Step 4: Precios */}
         <button
-          onClick={() => {
-            setCurrentStep(4);
-            setCurrentView('publish');
-          }}
+          onClick={() => handleSelectView('pricing')}
           style={{
             display: 'flex',
             alignItems: 'center',
-            gap: '6px',
-            padding: '5px 10px',
-            borderRadius: '8px',
-            border: currentStep === 4 ? '1px solid var(--accent-primary)' : '1px solid transparent',
-            background: currentStep === 4 ? 'var(--accent-primary-subtle)' : 'transparent',
-            color: currentStep === 4 ? '#ffffff' : '#94a3b8',
+            gap: '5px',
+            padding: '4px 10px',
+            borderRadius: '7px',
+            border: 'none',
+            background: current === 'pricing' ? '#ffffff' : 'transparent',
+            color: current === 'pricing' ? '#0284c7' : '#64748b',
+            boxShadow: current === 'pricing' ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
             fontSize: '11px',
-            fontWeight: 600,
+            fontWeight: current === 'pricing' ? 700 : 500,
             cursor: 'pointer',
           }}
         >
-          <span>4. Exportar</span>
+          <span>4. Precios</span>
         </button>
       </div>
 
@@ -238,10 +235,11 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({ onOpenHistory, onOpenPrese
           title={outputFolder}
           style={{ padding: '6px 12px', fontSize: '11px', borderRadius: '8px' }}
         >
-          <Folder size={13} color="var(--accent-primary)" />
+          <Folder size={13} color="#3b82f6" />
           <span>Carpeta</span>
         </button>
       </div>
     </header>
   );
 };
+

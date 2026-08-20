@@ -1,3 +1,5 @@
+export * from './pricing';
+
 export type PublicationType = 'individual' | 'set' | 'personalizado' | 'resina';
 
 export type PublicationFinish =
@@ -217,3 +219,24 @@ export const ADAPTABLE_SIZES: AdaptableSize[] = [
   { id: '50x70', name: '50 × 70 cm', label: '50 × 70 cm', aspectRatio: 'vertical', widthCm: 50, heightCm: 70, defaultPrice: 29900, basePrice: 29900, description: '3:4 Proporción dorada' },
   { id: '70x100', name: '70 × 100 cm', label: '70 × 100 cm', aspectRatio: 'vertical', widthCm: 70, heightCm: 100, defaultPrice: 42900, basePrice: 42900, description: 'Pared completa vertical XL' },
 ];
+
+export interface LibraryTitle {
+  id: string;
+  titulo: string;
+  titulo_original?: string;
+  anio?: string | number;
+  generos?: string[];
+  sinopsis?: string;
+  poster_path?: string;
+  posterUrl?: string;
+  category?: 'peliculas' | 'series' | 'anime' | 'gamer' | 'musica' | 'deportes' | 'arte_general' | string;
+  finishType?: 'resina' | 'vinilo' | 'mate' | 'brillante' | string;
+  seoTitle?: string;
+  selected?: boolean;
+  variantsCount?: number;
+  customPrice?: number;
+  availableSizes?: string[];
+}
+
+export type { DimensionPricingItem, FinishPricingItem, PricingConfig } from './pricing';
+

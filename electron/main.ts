@@ -208,3 +208,80 @@ ipcMain.handle('file:readTemplate', async (_event, filePath: string) => {
   }
 });
 
+// 9. Scan local cuadros library
+ipcMain.handle('catalog:scan', async (_event, basePath: string = 'E:\\AuraStudio\\Cuadros') => {
+  try {
+    if (!fs.existsSync(basePath)) {
+      return null;
+    }
+    const categories = ['peliculas', 'series', 'anime', 'videojuegos', 'musica', 'arte', 'deportes', 'paisajes', 'ciudades'];
+    const results: any[] = [];
+
+    for (const cat of categories) {
+      const catPath = path.join(basePath, cat);
+      if (!fs.existsSync(catPath)) continue;
+      const entries = fs.readdirSync(catPath, { withFileTypes: true });
+
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        const folderName = entry.name;
+        const folderPath = path.join(catPath, folderName);
+        const metaPath = path.join(folderPath, 'metadata.json');
+        let meta: any = null;
+
+        if (fs.existsSync(metaPath)) {
+          try {
+            meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+          } catch (e) {}
+        }
+
+        const posterDir = path.join(folderPath, 'poster');
+        const posters: any[] = [];
+
+        if (fs.existsSync(posterDir)) {
+          const files = fs.readdirSync(posterDir).filter(f => !f.endsWith('.part') && /\.(jpg|jpeg|png|webp)$/i.test(f));
+          for (const f of files) {
+            const metaPoster = meta?.posters?.find((p: any) => p.file === f);
+            const w = metaPoster?.width || 2000;
+            const h = metaPoster?.height || 3000;
+            const tier = h >= 2800 ? 'excelente' : h >= 1800 ? 'buena' : 'utilizable';
+            posters.push({
+              file: f,
+              file_path: metaPoster?.file_path || path.join(posterDir, f),
+              url_original: metaPoster?.url_original,
+              width: w,
+              height: h,
+              aspect_ratio: metaPoster?.aspect_ratio || Number((w / h).toFixed(5)),
+              quality_tier: tier,
+            });
+          }
+        }
+
+        const imgDir = path.join(folderPath, 'imagenes');
+        const imgCount = meta?.imagenes?.length || (fs.existsSync(imgDir) ? fs.readdirSync(imgDir).length : 0);
+
+        results.push({
+          id: `${cat}_${folderName}`,
+          folderName,
+          folderPath,
+          categoria: cat,
+          titulo: meta?.titulo || folderName.replace(/\s*\[.*\]/, '').trim(),
+          titulo_original: meta?.titulo_original || '',
+          anio: meta?.anio ? String(meta.anio) : '',
+          generos: meta?.generos || [],
+          source_id: meta?.id || undefined,
+          posters,
+          imagenesCount: imgCount,
+          selectedPosterIndex: 0,
+          selected: false,
+        });
+      }
+    }
+
+    return results.length > 0 ? results : null;
+  } catch (err) {
+    console.error('Error scanning library in electron main:', err);
+    return null;
+  }
+});
+

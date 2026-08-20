@@ -19,6 +19,7 @@ export interface ElectronAPI {
   saveBase64: (params: { base64Data: string; targetPath: string; quality?: number }) => Promise<{ success: boolean; path?: string; error?: string }>;
   saveBuffer: (params: { buffer: Uint8Array | ArrayBuffer; targetPath: string }) => Promise<{ success: boolean; path?: string; error?: string }>;
   readTemplate: (filePath: string) => Promise<{ success: boolean; buffer?: Uint8Array; error?: string }>;
+  scanLibrary?: (basePath?: string) => Promise<any>;
 }
 
 

@@ -20,13 +20,30 @@ import {
   PUBLICATION_FINISHES,
 } from '../types/publication';
 import {
+  DimensionPricingItem,
+  FinishPricingItem,
+  PricingConfig,
+  DEFAULT_PRICING_CONFIG,
+} from '../types/pricing';
+import {
   detectAspectRatio,
   extractThemeAndDesignFromFilename,
   generateAutoPublicationTitle,
   generateDefaultPublicationDescription,
 } from '../utils/publicationHelpers';
 
-export type StudioView = 'studio' | 'publish' | 'seo' | 'infographics' | 'unsplash' | 'presets';
+export type StudioView =
+  | 'library'
+  | 'mockups'
+  | 'publisher'
+  | 'pricing'
+  | 'studio'
+  | 'publish'
+  | 'seo'
+  | 'infographics'
+  | 'unsplash'
+  | 'presets';
+
 
 
 export interface ProductConfigState {
@@ -111,7 +128,16 @@ export interface GeneratedItem {
 
 interface AppStore {
   currentView: StudioView;
+  activeView: StudioView;
   setCurrentView: (view: StudioView) => void;
+  setActiveView: (view: StudioView) => void;
+
+  // Library Management
+  selectedLibraryTitles: string[];
+  toggleSelectedLibraryTitle: (title: string) => void;
+  selectAllLibraryTitles: (titles: string[]) => void;
+  clearSelectedLibraryTitles: () => void;
+  libraryCount: number;
 
   // Publication Workflow Step (1: Cargar, 2: Mockups, 3: Publicar, 4: Exportar)
   currentStep: number;
@@ -183,6 +209,15 @@ interface AppStore {
 
   history: HistoryItem[];
   addHistoryItem: (item: HistoryItem) => void;
+
+  // Pricing & Variants Configuration
+  pricingConfig: PricingConfig;
+  setPricingConfig: (config: PricingConfig) => void;
+  updateDimensionPricing: (id: string, updates: Partial<DimensionPricingItem>) => void;
+  updateFinishPricing: (id: string, updates: Partial<FinishPricingItem>) => void;
+  updatePricingParam: <K extends keyof PricingConfig>(key: K, value: PricingConfig[K]) => void;
+  resetPricingConfig: () => void;
+
   loadInitialStore: () => Promise<void>;
   syncToStore: () => Promise<void>;
 }
@@ -194,20 +229,31 @@ const defaultSizePrices: Record<string, number> = ADAPTABLE_SIZES.reduce(
 
 export const useAppStore = create<AppStore>((set, get) => ({
   currentView: 'studio',
+  activeView: 'studio',
+  setActiveView: (view) => set({ activeView: view }),
   setCurrentView: (view) => {
-    // Sync currentStep when switching views
     let step = get().currentStep;
     if (view === 'studio') step = get().selectedImage ? 2 : 1;
     else if (view === 'publish') step = 3;
-    set({ currentView: view, currentStep: step });
+    set({ currentView: view, activeView: view, currentStep: step });
   },
+
+  selectedLibraryTitles: [],
+  toggleSelectedLibraryTitle: (title) =>
+    set((state) => ({
+      selectedLibraryTitles: state.selectedLibraryTitles.includes(title)
+        ? state.selectedLibraryTitles.filter((t) => t !== title)
+        : [...state.selectedLibraryTitles, title],
+    })),
+  selectAllLibraryTitles: (titles) => set({ selectedLibraryTitles: titles }),
+  clearSelectedLibraryTitles: () => set({ selectedLibraryTitles: [] }),
+  libraryCount: 313,
 
   currentStep: 1,
   setCurrentStep: (step) => {
     set({ currentStep: step });
-    if (step === 1 || step === 2) set({ currentView: 'studio' });
-    else if (step === 3) set({ currentView: 'publish' });
-    else if (step === 4) set({ currentView: 'publish' });
+    if (step === 1 || step === 2) set({ currentView: 'mockups', activeView: 'mockups' });
+    else if (step === 3 || step === 4) set({ currentView: 'publisher', activeView: 'publisher' });
   },
 
   detectedAspectRatio: 'horizontal',
@@ -583,6 +629,42 @@ export const useAppStore = create<AppStore>((set, get) => ({
     get().syncToStore();
   },
 
+  pricingConfig: DEFAULT_PRICING_CONFIG,
+  setPricingConfig: (pricingConfig) => {
+    set({ pricingConfig });
+    get().syncToStore();
+  },
+  updateDimensionPricing: (id, updates) =>
+    set((state) => {
+      const currentDims = state.pricingConfig.dimensions || DEFAULT_PRICING_CONFIG.dimensions;
+      const updatedDimensions = currentDims.map((dim) =>
+        dim.id === id ? { ...dim, ...updates } : dim
+      );
+      const updated = { ...state.pricingConfig, dimensions: updatedDimensions };
+      setTimeout(() => get().syncToStore(), 200);
+      return { pricingConfig: updated };
+    }),
+  updateFinishPricing: (id, updates) =>
+    set((state) => {
+      const currentFinishes = state.pricingConfig.finishes || DEFAULT_PRICING_CONFIG.finishes;
+      const updatedFinishes = currentFinishes.map((finish) =>
+        finish.id === id ? { ...finish, ...updates } : finish
+      );
+      const updated = { ...state.pricingConfig, finishes: updatedFinishes };
+      setTimeout(() => get().syncToStore(), 200);
+      return { pricingConfig: updated };
+    }),
+  updatePricingParam: (key, value) =>
+    set((state) => {
+      const updated = { ...state.pricingConfig, [key]: value };
+      setTimeout(() => get().syncToStore(), 200);
+      return { pricingConfig: updated };
+    }),
+  resetPricingConfig: () => {
+    set({ pricingConfig: DEFAULT_PRICING_CONFIG });
+    get().syncToStore();
+  },
+
   loadInitialStore: async () => {
     if (window.electronAPI) {
       try {
@@ -603,6 +685,16 @@ export const useAppStore = create<AppStore>((set, get) => ({
           if (storeData.publicationType) set({ publicationType: storeData.publicationType });
           if (storeData.sizePrices) set((state) => ({ sizePrices: { ...state.sizePrices, ...storeData.sizePrices } }));
           if (storeData.selectedFinishes) set({ selectedFinishes: storeData.selectedFinishes });
+          if (storeData.pricingConfig) {
+            set((state) => ({
+              pricingConfig: {
+                ...DEFAULT_PRICING_CONFIG,
+                ...storeData.pricingConfig,
+                dimensions: storeData.pricingConfig.dimensions || DEFAULT_PRICING_CONFIG.dimensions,
+                finishes: storeData.pricingConfig.finishes || DEFAULT_PRICING_CONFIG.finishes,
+              },
+            }));
+          }
         }
       } catch (e) {
         console.error('Error loading electron store:', e);
@@ -623,6 +715,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         publicationType: state.publicationType,
         sizePrices: state.sizePrices,
         selectedFinishes: state.selectedFinishes,
+        pricingConfig: state.pricingConfig,
       });
     }
   },

@@ -13,5 +13,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('file:saveBuffer', params),
   readTemplate: (filePath: string) =>
     ipcRenderer.invoke('file:readTemplate', filePath),
+  scanLibrary: (basePath?: string) =>
+    ipcRenderer.invoke('catalog:scan', basePath),
 });
 

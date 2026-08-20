@@ -1,5 +1,5 @@
 /* ==========================================================================
-   AuraPublisher Design Tokens — Frosted Luxury Dark (#de2367 Ruby Edition)
+   AuraPublisher Design Tokens — Glassmorphism Light & Pastel Mesh
    ========================================================================== */
 
 @font-face {
@@ -12,38 +12,78 @@
 
 :root {
   /* Brand Typography */
-  --font-display: 'Cal Sans', 'Lexend', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  --font-sans: 'Inter', 'Lexend', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-display: 'Cal Sans', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
 
-  /* Primary Accent: Aura Ruby Magenta #de2367 */
-  --accent-gold: #de2367;
-  --accent-primary: #de2367;
-  --accent-primary-hover: #f43f7e;
-  --accent-primary-active: #be185d;
-  --accent-primary-glow: rgba(222, 35, 103, 0.45);
-  --accent-primary-subtle: rgba(222, 35, 103, 0.12);
-  --accent-primary-border: rgba(222, 35, 103, 0.35);
+  /* Ambient Mesh Background */
+  --bg-ambient-mesh: linear-gradient(135deg, #4f46e5 0%, #ec4899 45%, #f97316 100%);
 
-  /* Deep Dark Surfaces */
-  --bg-deep: #07090e;
-  --bg-app: #0a0d14;
-  --bg-surface: rgba(18, 22, 32, 0.70);
-  --bg-surface-elevated: rgba(24, 29, 42, 0.85);
-  --bg-card: rgba(255, 255, 255, 0.035);
-  --bg-card-hover: rgba(255, 255, 255, 0.065);
-  --bg-card-active: rgba(222, 35, 103, 0.12);
+  /* Sidebar Glassmorphism */
+  --glass-sidebar-bg: rgba(255, 255, 255, 0.16);
+  --glass-sidebar-blur: blur(28px);
+  --glass-sidebar-border: rgba(255, 255, 255, 0.25);
+  --glass-sidebar-active: rgba(255, 255, 255, 0.25);
+  --glass-sidebar-hover: rgba(255, 255, 255, 0.12);
+  --glass-sidebar-text: #ffffff;
+  --glass-sidebar-text-muted: rgba(255, 255, 255, 0.70);
 
-  /* Text & Typography */
-  --text-primary: #ffffff;
-  --text-body: #cbd5e1;
+  /* Workspace Crisp Surface */
+  --surface-workspace-bg: #ffffff;
+  --surface-workspace-radius: 20px 0 0 0;
+  --surface-workspace-shadow: 0 20px 50px rgba(0, 0, 0, 0.18);
+
+  /* Text Hierarchy (Workspace Surface) */
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
   --text-muted: #94a3b8;
-  --text-subtle: #64748b;
+  --text-subtle: #cbd5e1;
 
-  /* Frosted Glass Borders */
-  --border-subtle: rgba(255, 255, 255, 0.08);
-  --border-medium: rgba(255, 255, 255, 0.14);
-  --border-focus: #de2367;
+  /* Brand Accents */
+  --accent-blue: #3b82f6;
+  --accent-blue-hover: #2563eb;
+  --accent-blue-subtle: rgba(59, 130, 246, 0.08);
+  --accent-blue-border: rgba(59, 130, 246, 0.25);
+  --accent-primary: #3b82f6;
+  --accent-primary-hover: #2563eb;
+  --accent-primary-glow: rgba(59, 130, 246, 0.35);
+  --accent-primary-subtle: rgba(59, 130, 246, 0.08);
+  --accent-primary-border: rgba(59, 130, 246, 0.25);
+  --accent-gold: #f59e0b;
+
+  /* Pastel Pills */
+  --pastel-red-bg: #fee2e2;
+  --pastel-red-text: #ef4444;
+  --pastel-red-border: #fca5a5;
+
+  --pastel-amber-bg: #fef3c7;
+  --pastel-amber-text: #d97706;
+  --pastel-amber-border: #fcd34d;
+
+  --pastel-indigo-bg: #ede9fe;
+  --pastel-indigo-text: #7c3aed;
+  --pastel-indigo-border: #c4b5fd;
+
+  --pastel-green-bg: #d1fae5;
+  --pastel-green-text: #059669;
+  --pastel-green-border: #6ee7b7;
+
+  --pastel-blue-bg: #e0f2fe;
+  --pastel-blue-text: #0284c7;
+  --pastel-blue-border: #7dd3fc;
+
+  /* Surface & Card Colors */
+  --bg-surface: #ffffff;
+  --bg-surface-subtle: #f8fafc;
+  --bg-surface-elevated: #f1f5f9;
+  --bg-card: #ffffff;
+  --bg-card-hover: #f8fafc;
+  --bg-card-active: #f1f5f9;
+
+  /* Frosted & Subtle Borders */
+  --border-subtle: #e2e8f0;
+  --border-medium: #cbd5e1;
+  --border-focus: #3b82f6;
 
   /* Radii */
   --radius-xs: 4px;
@@ -54,6 +94,8 @@
   --radius-full: 9999px;
 
   /* Shadows */
-  --shadow-card: 0 4px 20px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.08);
-  --shadow-modal: 0 32px 80px rgba(0, 0, 0, 0.8), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --shadow-card: 0 4px 16px rgba(15, 23, 42, 0.06), 0 1px 2px rgba(15, 23, 42, 0.04);
+  --shadow-card-hover: 0 10px 25px rgba(15, 23, 42, 0.10);
+  --shadow-modal: 0 25px 60px rgba(15, 23, 42, 0.25);
 }
