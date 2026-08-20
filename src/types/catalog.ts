@@ -94,14 +94,10 @@ export interface ReflectionOption {
 }
 
 export const REFLECTION_OPTIONS: ReflectionOption[] = [
-  { id: 'industrial_loft', name: 'Loft Industrial', icon: '🏭', description: 'Gran ventanal industrial con 9 cuadrantes de hierro' },
-  { id: 'panoramic_window', name: 'Ventanal Panorámico', icon: '🪟', description: 'Ventanal piso-techo con follaje exterior y cielo HDR' },
-  { id: 'sunny_balcony', name: 'Balcón Soleado', icon: '☀️', description: 'Luz intensa de balcón abierto con rayos directos' },
-  { id: 'french_window', name: 'Ventana Francesa', icon: '🏛️', description: 'Molduras clásicas arqueadas con luz difusa suave' },
-  { id: 'double_corner', name: 'Esquina Doble Altura', icon: '🏢', description: 'Ventanal en esquina de dos caras con luz cruzada' },
-  { id: 'skylight_zenith', name: 'Tragaluz Cenital', icon: '🌌', description: 'Apertura en el techo con proyección cenital' },
-  { id: 'gallery_track', name: 'Riel Spot Galería', icon: '🎨', description: 'Riel de focos proyectores directos de museo' },
-  { id: 'warm_lamp', name: 'Lámpara Cálida', icon: '🛋️', description: 'Luz cálida de lámpara de pie y ambiente hogareño' },
+  { id: 'industrial_loft', name: 'Loft Industrial', icon: '🏭', description: 'Ventanales de hierro, columnas de hormigón y luces colgantes' },
+  { id: 'panoramic_window', name: 'Ventanal Panorámico', icon: '🪟', description: 'Gran ventanal moderno de pared completa con horizonte' },
+  { id: 'sunny_balcony', name: 'Balcón Luminoso', icon: '☀️', description: 'Alta luminosidad y claridad exterior natural' },
+  { id: 'gallery_track', name: 'Rieles Lumínicos', icon: '💡', description: 'Múltiples rieles de focos proyectores de galería' },
 ];
 
 export const REFLECTION_DIRECTIONS: Array<{ id: ReflectionDirection; name: string; icon: string; angle: number }> = [

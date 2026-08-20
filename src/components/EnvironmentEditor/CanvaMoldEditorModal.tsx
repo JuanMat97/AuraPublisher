@@ -127,11 +127,14 @@ interface EditorSnapshot {
   wallHarmonization: number;
   ceilingLightsEnabled: boolean;
   ceilingLightTemp: 'warm' | 'neutral' | 'cool';
+  warmLampEnabled: boolean;
   sunIntensity: number;
   shadowPreset: CanvaShadowPreset;
   shadowBlur: number;
   shadowIntensity: number;
   shadowDistance: number;
+  shadowOffsetX: number;
+  shadowOffsetY: number;
   shadowAngleDeg: number;
   shadowContactOcclusion: number;
 }
@@ -282,12 +285,15 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
     pos?.shadowStyleIntensity ?? productConfig.shadowIntensity ?? 50
   );
   const [shadowDistance, setShadowDistance] = useState(pos?.shadowDistance ?? 30);
+  const [shadowOffsetX, setShadowOffsetX] = useState(pos?.shadowOffsetX ?? 0);
+  const [shadowOffsetY, setShadowOffsetY] = useState(pos?.shadowOffsetY ?? 0);
   const [shadowAngleDeg, setShadowAngleDeg] = useState(
     pos?.shadowAngleDeg ?? 90 + (pos?.reflectionAngleDeg ?? productConfig.reflectionAngleDeg ?? 0) * 0.5
   );
   const [shadowContactOcclusion, setShadowContactOcclusion] = useState(
     pos?.shadowContactOcclusion ?? (pos?.placementMode === 'shelf' ? 80 : 40)
   );
+  const [warmLampEnabled, setWarmLampEnabled] = useState<boolean>(pos?.warmLampEnabled ?? false);
 
   // Undo / Redo History Stack
   const undoStackRef = useRef<EditorSnapshot[]>([]);
@@ -349,11 +355,14 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
       wallHarmonization,
       ceilingLightsEnabled,
       ceilingLightTemp,
+      warmLampEnabled,
       sunIntensity,
       shadowPreset,
       shadowBlur,
       shadowIntensity,
       shadowDistance,
+      shadowOffsetX,
+      shadowOffsetY,
       shadowAngleDeg,
       shadowContactOcclusion,
     };
@@ -410,11 +419,14 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
     wallHarmonization,
     ceilingLightsEnabled,
     ceilingLightTemp,
+    warmLampEnabled,
     sunIntensity,
     shadowPreset,
     shadowBlur,
     shadowIntensity,
     shadowDistance,
+    shadowOffsetX,
+    shadowOffsetY,
     shadowAngleDeg,
     shadowContactOcclusion,
   ]);
@@ -481,11 +493,14 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
     setWallHarmonization(snap.wallHarmonization);
     setCeilingLightsEnabled(snap.ceilingLightsEnabled);
     setCeilingLightTemp(snap.ceilingLightTemp);
+    setWarmLampEnabled(snap.warmLampEnabled ?? false);
     setSunIntensity(snap.sunIntensity);
     setShadowPreset(snap.shadowPreset);
     setShadowBlur(snap.shadowBlur);
     setShadowIntensity(snap.shadowIntensity);
     setShadowDistance(snap.shadowDistance);
+    setShadowOffsetX(snap.shadowOffsetX ?? 0);
+    setShadowOffsetY(snap.shadowOffsetY ?? 0);
     setShadowAngleDeg(snap.shadowAngleDeg);
     setShadowContactOcclusion(snap.shadowContactOcclusion);
   }, []);
@@ -664,6 +679,7 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
       reflScale: number,
       reflRough: number,
       reflBright: number,
+      reflContrast: number,
       wallHarm: number,
       curFinish: 'resina' | 'brillante' | 'mate',
       sunInt: number,
@@ -685,6 +701,9 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
           lightMode: effectiveLightMode,
           ceilingLightsEnabled: cLightsEnabled,
           ceilingLightTemp: cLightTemp,
+          reflectionBrightness: reflBright,
+          reflectionContrast: reflContrast,
+          warmLampEnabled,
         });
         if (threeState.current.currentEnvRenderTarget) {
           threeState.current.currentEnvRenderTarget.dispose();
@@ -696,36 +715,39 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
       }
 
       // Determine material profile based on Finish Mode
-      let roughness = 0.22;
-      let clearcoat = 0.6;
+      let roughness = 0.08;
+      let clearcoat = 0.85;
       let clearcoatRoughness = reflRough;
-      let envMapIntensity = 1.8;
-      let specularIntensity = 1.4;
+      let envMapIntensity = 2.0;
+      let specularIntensity = 1.6;
       let emissiveBoost = 1.0;
+      let ior = 1.50;
 
       if (curFinish === 'resina') {
-        roughness = RESIN_OVERLAY.roughness ?? 0.012;
-        clearcoat = RESIN_OVERLAY.clearcoat ?? 1.0;
-        clearcoatRoughness = Math.min(reflRough, 0.03);
-        envMapIntensity = (RESIN_OVERLAY.envMapIntensity ?? 4.5) * (reflInt / 0.2);
-        specularIntensity = RESIN_OVERLAY.specularIntensity ?? 2.2;
-        emissiveBoost = RESIN_OVERLAY.colorBoost ?? 1.06;
+        roughness = 0.015;
+        clearcoat = 1.0;
+        clearcoatRoughness = Math.min(reflRough, 0.02);
+        envMapIntensity = 3.5 * Math.max(0.4, reflInt / 0.2);
+        specularIntensity = 2.4;
+        emissiveBoost = 1.04;
+        ior = 1.54;
       } else if (curFinish === 'mate') {
-        const m = finishPresets.mate;
-        roughness = m.roughness;
-        clearcoat = 0;
-        clearcoatRoughness = 0.9;
+        roughness = 0.42;
+        clearcoat = 0.05;
+        clearcoatRoughness = 0.85;
         envMapIntensity = 0.3 * (reflInt / 0.2);
-        specularIntensity = 0.3;
+        specularIntensity = 0.35;
         emissiveBoost = 1.0;
+        ior = 1.45;
       } else {
-        const b = finishPresets.brillante;
-        roughness = b.roughness;
-        clearcoat = b.clearcoat;
+        // Vinilo brillante
+        roughness = 0.08;
+        clearcoat = 0.85;
         clearcoatRoughness = reflRough;
-        envMapIntensity = b.envMapIntensity * (reflInt / 0.2);
-        specularIntensity = b.specularIntensity;
+        envMapIntensity = 2.0 * (reflInt / 0.2);
+        specularIntensity = 1.6;
         emissiveBoost = 1.0;
+        ior = 1.50;
       }
 
       // Weather lighting modifiers
@@ -1094,18 +1116,21 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
           gradedCanvases.push(gCanvas);
           gradedTextures.push(gTex);
 
+          const isRes = finishMode === 'resina';
+          const isMat = finishMode === 'mate';
+
           const frontMat = new THREE.MeshPhysicalMaterial({
             map: gTex,
-            color: new THREE.Color(1, 1, 1),
+            color: new THREE.Color(isRes ? 1.04 : 1, isRes ? 1.04 : 1, isRes ? 1.04 : 1),
             emissive: new THREE.Color(0xffffff),
             emissiveMap: gTex,
-            emissiveIntensity: 0.1,
-            roughness: 0.22,
-            clearcoat: 0.6,
-            clearcoatRoughness: reflectionRoughness,
-            envMapIntensity: 1.8,
-            ior: 1.5,
-            specularIntensity: 1.4,
+            emissiveIntensity: isRes ? 0.04 : isMat ? 0.12 : 0.08,
+            roughness: isRes ? 0.015 : isMat ? 0.42 : 0.08,
+            clearcoat: isRes ? 1.0 : isMat ? 0.05 : 0.85,
+            clearcoatRoughness: isRes ? 0.015 : reflectionRoughness,
+            envMapIntensity: isRes ? 3.5 : isMat ? 0.3 : 2.0,
+            ior: isRes ? 1.54 : isMat ? 1.45 : 1.50,
+            specularIntensity: isRes ? 2.4 : isMat ? 0.35 : 1.6,
           });
           frontMaterials.push(frontMat);
 
@@ -1151,9 +1176,11 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
           shadowPreset,
           aspectRatio: totalW / totalH,
           angleDeg: shadowAngleDeg,
-          distance: 30,
+          distance: shadowDistance,
           blur: shadowBlur,
           intensity: shadowIntensity,
+          offsetX: shadowOffsetX,
+          offsetY: shadowOffsetY,
           wallAngleDeg: wallAngle,
           pitchDeg: pitchAngle,
           rollDeg: rollAngle,
@@ -1172,7 +1199,7 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
           transparent: true,
           depthWrite: false,
         });
-        const shadowMesh = new THREE.Mesh(new THREE.PlaneGeometry(totalW * 2.2, totalH * 2.2), shadowMat);
+        const shadowMesh = new THREE.Mesh(new THREE.PlaneGeometry(totalW * 1.80, totalH * 1.80), shadowMat);
         scene.add(shadowMesh);
 
         // 3D Wall Perspective Wireframe Grid
@@ -1241,6 +1268,7 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
           reflectionScale,
           reflectionRoughness,
           reflectionBrightness,
+          reflectionContrast,
           wallHarmonization,
           finishMode,
           sunIntensity,
@@ -1404,6 +1432,7 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
       reflectionScale,
       reflectionRoughness,
       reflectionBrightness,
+      reflectionContrast,
       wallHarmonization,
       finishMode,
       sunIntensity,
@@ -1418,6 +1447,7 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
     reflectionScale,
     reflectionRoughness,
     reflectionBrightness,
+    reflectionContrast,
     wallHarmonization,
     finishMode,
     sunIntensity,
@@ -1447,6 +1477,8 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
         distance: shadowDistance,
         blur: shadowBlur,
         intensity: shadowIntensity,
+        offsetX: shadowOffsetX,
+        offsetY: shadowOffsetY,
         wallAngleDeg: wallAngle,
         pitchDeg: pitchAngle,
         rollDeg: rollAngle,
@@ -1463,6 +1495,8 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
     shadowBlur,
     shadowIntensity,
     shadowDistance,
+    shadowOffsetX,
+    shadowOffsetY,
     wallAngle,
     pitchAngle,
     rollAngle,
@@ -3065,20 +3099,42 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                     border: '1px solid rgba(255, 255, 255, 0.08)',
                   }}
                 >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                       <Box size={13} color="var(--accent-primary)" />
                       <span style={{ fontSize: '11px', fontWeight: 600, color: '#ffffff' }}>Grosor del Cuadro</span>
                     </div>
-                    <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--accent-primary)' }}>
-                      {thicknessCm.toFixed(1)} cm
-                    </span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <input
+                        type="number"
+                        min="1"
+                        max="12"
+                        step="0.5"
+                        value={thicknessCm}
+                        onChange={(e) => {
+                          const v = isNaN(parseFloat(e.target.value)) ? 1.0 : Math.max(1, Math.min(12, parseFloat(e.target.value)));
+                          setThicknessCm(v);
+                        }}
+                        style={{
+                          width: '44px',
+                          padding: '1px 4px',
+                          fontSize: '10.5px',
+                          fontWeight: 700,
+                          color: 'var(--accent-primary)',
+                          background: 'rgba(0,0,0,0.4)',
+                          border: '1px solid rgba(255,255,255,0.15)',
+                          borderRadius: '4px',
+                          textAlign: 'right',
+                        }}
+                      />
+                      <span style={{ fontSize: '10.5px', color: '#94a3b8' }}>cm</span>
+                    </div>
                   </div>
                   <input
                     type="range"
-                    min="0.5"
+                    min="1.0"
                     max="12.0"
-                    step="0.1"
+                    step="0.5"
                     value={thicknessCm}
                     onChange={(e) => setThicknessCm(parseFloat(e.target.value))}
                     style={{ marginBottom: '8px' }}
@@ -3087,8 +3143,8 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                     {[
                       { label: '1 cm', val: 1.0 },
                       { label: '2 cm', val: 2.0 },
-                      { label: '3.5 cm', val: 3.5 },
-                      { label: '6 cm', val: 6.0 },
+                      { label: '4 cm', val: 4.0 },
+                      { label: '8 cm', val: 8.0 },
                       { label: '12 cm', val: 12.0 },
                     ].map((b) => (
                       <button
@@ -3117,7 +3173,7 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                   </div>
                 </div>
 
-                {/* 3. Distancia a la Pared (Atraer / Empujar en Z) */}
+                {/* 3. Distancia a la Pared (Atraer / Empujar en Z: 0 a 30 cm) */}
                 <div
                   style={{
                     background: 'rgba(255, 255, 255, 0.03)',
@@ -3126,22 +3182,76 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                     border: '1px solid rgba(255, 255, 255, 0.08)',
                   }}
                 >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
                     <span style={{ fontSize: '11px', fontWeight: 600, color: '#ffffff' }}>
                       Distancia a la Pared (Atraer / Empujar)
                     </span>
-                    <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--accent-primary)' }}>
-                      {zDistance.toFixed(1)} cm
-                    </span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <input
+                        type="number"
+                        min="0"
+                        max="30"
+                        step="0.5"
+                        value={zDistance}
+                        onChange={(e) => {
+                          const v = isNaN(parseFloat(e.target.value)) ? 0 : Math.max(0, Math.min(30, parseFloat(e.target.value)));
+                          setZDistance(v);
+                        }}
+                        style={{
+                          width: '44px',
+                          padding: '1px 4px',
+                          fontSize: '10.5px',
+                          fontWeight: 700,
+                          color: zDistance === 0 ? '#22c55e' : 'var(--accent-primary)',
+                          background: 'rgba(0,0,0,0.4)',
+                          border: '1px solid rgba(255,255,255,0.15)',
+                          borderRadius: '4px',
+                          textAlign: 'right',
+                        }}
+                      />
+                      <span style={{ fontSize: '10.5px', color: '#94a3b8' }}>cm</span>
+                    </div>
                   </div>
                   <input
                     type="range"
                     min="0"
-                    max="8.0"
-                    step="0.1"
+                    max="30.0"
+                    step="0.5"
                     value={zDistance}
                     onChange={(e) => setZDistance(parseFloat(e.target.value))}
+                    style={{ marginBottom: '8px' }}
                   />
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '4px' }}>
+                    {[
+                      { label: '0 cm (Pared)', val: 0 },
+                      { label: '5 cm', val: 5 },
+                      { label: '15 cm', val: 15 },
+                      { label: '30 cm (Max)', val: 30 },
+                    ].map((btn) => (
+                      <button
+                        key={btn.label}
+                        onClick={() => {
+                          pushSnapshot();
+                          setZDistance(btn.val);
+                        }}
+                        style={{
+                          padding: '4px',
+                          borderRadius: '6px',
+                          fontSize: '9.5px',
+                          fontWeight: zDistance === btn.val ? 700 : 500,
+                          background: zDistance === btn.val ? 'var(--accent-primary-subtle)' : 'rgba(255,255,255,0.04)',
+                          border:
+                            zDistance === btn.val
+                              ? '1px solid var(--accent-primary)'
+                              : '1px solid rgba(255,255,255,0.08)',
+                          color: zDistance === btn.val ? '#ffffff' : '#94a3b8',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        {btn.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
                 {/* 4. Rotación Z (Roll / Diagonal) */}
@@ -3157,29 +3267,29 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                     <span style={{ fontSize: '11px', fontWeight: 600, color: '#ffffff' }}>
                       Rotación Z (Roll / Diagonal)
                     </span>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--accent-primary)' }}>
-                        {rollAngle > 0 ? `+${rollAngle}°` : `${rollAngle}°`}
-                      </span>
-                      {rollAngle !== 0 && (
-                        <button
-                          onClick={() => {
-                            pushSnapshot();
-                            setRollAngle(0);
-                          }}
-                          style={{
-                            background: 'rgba(255,255,255,0.06)',
-                            border: '1px solid rgba(255,255,255,0.1)',
-                            color: '#94a3b8',
-                            padding: '2px 6px',
-                            borderRadius: '4px',
-                            fontSize: '9px',
-                            cursor: 'pointer',
-                          }}
-                        >
-                          0°
-                        </button>
-                      )}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <input
+                        type="number"
+                        min="-45"
+                        max="45"
+                        value={rollAngle}
+                        onChange={(e) => {
+                          const v = isNaN(parseInt(e.target.value)) ? 0 : Math.max(-45, Math.min(45, parseInt(e.target.value)));
+                          setRollAngle(v);
+                        }}
+                        style={{
+                          width: '42px',
+                          padding: '1px 4px',
+                          fontSize: '10.5px',
+                          fontWeight: 700,
+                          color: 'var(--accent-primary)',
+                          background: 'rgba(0,0,0,0.4)',
+                          border: '1px solid rgba(255,255,255,0.15)',
+                          borderRadius: '4px',
+                          textAlign: 'right',
+                        }}
+                      />
+                      <span style={{ fontSize: '10.5px', color: '#94a3b8' }}>°</span>
                     </div>
                   </div>
                   <input
@@ -3205,9 +3315,30 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                     <span style={{ fontSize: '11px', fontWeight: 600, color: '#ffffff' }}>
                       Inclinación Vertical (Pitch / Repisa)
                     </span>
-                    <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--accent-primary)' }}>
-                      {pitchAngle > 0 ? `+${pitchAngle}º` : `${pitchAngle}º`}
-                    </span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <input
+                        type="number"
+                        min="-75"
+                        max="75"
+                        value={pitchAngle}
+                        onChange={(e) => {
+                          const v = isNaN(parseInt(e.target.value)) ? 0 : Math.max(-75, Math.min(75, parseInt(e.target.value)));
+                          setPitchAngle(v);
+                        }}
+                        style={{
+                          width: '42px',
+                          padding: '1px 4px',
+                          fontSize: '10.5px',
+                          fontWeight: 700,
+                          color: 'var(--accent-primary)',
+                          background: 'rgba(0,0,0,0.4)',
+                          border: '1px solid rgba(255,255,255,0.15)',
+                          borderRadius: '4px',
+                          textAlign: 'right',
+                        }}
+                      />
+                      <span style={{ fontSize: '10.5px', color: '#94a3b8' }}>º</span>
+                    </div>
                   </div>
                   <input
                     type="range"
@@ -3311,9 +3442,30 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                     <span style={{ fontSize: '11px', fontWeight: 600, color: '#ffffff' }}>
                       Ángulo Horizontal (Pared)
                     </span>
-                    <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--accent-primary)' }}>
-                      {wallAngle > 0 ? `+${wallAngle}º` : `${wallAngle}º`}
-                    </span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <input
+                        type="number"
+                        min="-60"
+                        max="60"
+                        value={wallAngle}
+                        onChange={(e) => {
+                          const v = isNaN(parseInt(e.target.value)) ? 0 : Math.max(-60, Math.min(60, parseInt(e.target.value)));
+                          setWallAngle(v);
+                        }}
+                        style={{
+                          width: '42px',
+                          padding: '1px 4px',
+                          fontSize: '10.5px',
+                          fontWeight: 700,
+                          color: 'var(--accent-primary)',
+                          background: 'rgba(0,0,0,0.4)',
+                          border: '1px solid rgba(255,255,255,0.15)',
+                          borderRadius: '4px',
+                          textAlign: 'right',
+                        }}
+                      />
+                      <span style={{ fontSize: '10.5px', color: '#94a3b8' }}>º</span>
+                    </div>
                   </div>
                   <input
                     type="range"
@@ -3324,84 +3476,6 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                     onChange={(e) => setWallAngle(parseInt(e.target.value))}
                     style={{ marginBottom: '8px' }}
                   />
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '4px' }}>
-                    <button
-                      onClick={() => {
-                        pushSnapshot();
-                        setWallAngle(0);
-                      }}
-                      style={{
-                        padding: '4px',
-                        borderRadius: '6px',
-                        fontSize: '10px',
-                        fontWeight: 600,
-                        background: 'rgba(255,255,255,0.04)',
-                        color: '#ffffff',
-                        border: '1px solid rgba(255,255,255,0.08)',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        gap: '3px',
-                      }}
-                    >
-                      <RotateCcw size={10} /> 0º
-                    </button>
-                    <button
-                      onClick={() => {
-                        pushSnapshot();
-                        setWallAngle(35);
-                      }}
-                      style={{
-                        padding: '4px',
-                        borderRadius: '6px',
-                        fontSize: '10px',
-                        fontWeight: 600,
-                        background: 'rgba(255,255,255,0.04)',
-                        color: '#ffffff',
-                        border: '1px solid rgba(255,255,255,0.08)',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      35º
-                    </button>
-                    <button
-                      onClick={() => {
-                        pushSnapshot();
-                        setWallAngle(-35);
-                      }}
-                      style={{
-                        padding: '4px',
-                        borderRadius: '6px',
-                        fontSize: '10px',
-                        fontWeight: 600,
-                        background: 'rgba(255,255,255,0.04)',
-                        color: '#ffffff',
-                        border: '1px solid rgba(255,255,255,0.08)',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      -35º
-                    </button>
-                    <button
-                      onClick={() => {
-                        pushSnapshot();
-                        setWallAngle(90);
-                      }}
-                      style={{
-                        padding: '4px',
-                        borderRadius: '6px',
-                        fontSize: '10px',
-                        fontWeight: 600,
-                        background: 'rgba(255,255,255,0.04)',
-                        color: '#ffffff',
-                        border: '1px solid rgba(255,255,255,0.08)',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      Canto
-                    </button>
-                  </div>
                 </div>
 
                 {/* 7. Escala del Cuadro */}
@@ -3413,11 +3487,32 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                     border: '1px solid rgba(255, 255, 255, 0.08)',
                   }}
                 >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
                     <span style={{ fontSize: '11px', fontWeight: 600, color: '#ffffff' }}>Escala del Cuadro</span>
-                    <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--accent-primary)' }}>
-                      {Math.round(scaleWidth * 100)}%
-                    </span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <input
+                        type="number"
+                        min="5"
+                        max="90"
+                        value={Math.round(scaleWidth * 100)}
+                        onChange={(e) => {
+                          const v = isNaN(parseInt(e.target.value)) ? 40 : Math.max(5, Math.min(90, parseInt(e.target.value)));
+                          setScaleWidth(v / 100);
+                        }}
+                        style={{
+                          width: '42px',
+                          padding: '1px 4px',
+                          fontSize: '10.5px',
+                          fontWeight: 700,
+                          color: 'var(--accent-primary)',
+                          background: 'rgba(0,0,0,0.4)',
+                          border: '1px solid rgba(255,255,255,0.15)',
+                          borderRadius: '4px',
+                          textAlign: 'right',
+                        }}
+                      />
+                      <span style={{ fontSize: '10.5px', color: '#94a3b8' }}>%</span>
+                    </div>
                   </div>
                   <input
                     type="range"
@@ -3540,11 +3635,30 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                     {/* Brillo / Exposición */}
                     <div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#ffffff', marginBottom: '2px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', color: '#ffffff', marginBottom: '2px' }}>
                         <span>Exposición / Brillo</span>
-                        <span style={{ fontWeight: 700, color: 'var(--accent-primary)' }}>
-                          {adjustDestination === 'artwork' ? brightness : brightnessBg}
-                        </span>
+                        <input
+                          type="number"
+                          min="-100"
+                          max="100"
+                          value={adjustDestination === 'artwork' ? brightness : brightnessBg}
+                          onChange={(e) => {
+                            const v = isNaN(parseInt(e.target.value)) ? 0 : Math.max(-100, Math.min(100, parseInt(e.target.value)));
+                            if (adjustDestination === 'artwork') setBrightness(v);
+                            else setBrightnessBg(v);
+                          }}
+                          style={{
+                            width: '44px',
+                            padding: '1px 4px',
+                            fontSize: '10.5px',
+                            fontWeight: 700,
+                            color: 'var(--accent-primary)',
+                            background: 'rgba(0,0,0,0.4)',
+                            border: '1px solid rgba(255,255,255,0.15)',
+                            borderRadius: '4px',
+                            textAlign: 'right',
+                          }}
+                        />
                       </div>
                       <input
                         type="range"
@@ -3561,11 +3675,30 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
 
                     {/* Contraste */}
                     <div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#ffffff', marginBottom: '2px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', color: '#ffffff', marginBottom: '2px' }}>
                         <span>Contraste</span>
-                        <span style={{ fontWeight: 700, color: 'var(--accent-primary)' }}>
-                          {adjustDestination === 'artwork' ? contrast : contrastBg}
-                        </span>
+                        <input
+                          type="number"
+                          min="-100"
+                          max="100"
+                          value={adjustDestination === 'artwork' ? contrast : contrastBg}
+                          onChange={(e) => {
+                            const v = isNaN(parseInt(e.target.value)) ? 0 : Math.max(-100, Math.min(100, parseInt(e.target.value)));
+                            if (adjustDestination === 'artwork') setContrast(v);
+                            else setContrastBg(v);
+                          }}
+                          style={{
+                            width: '44px',
+                            padding: '1px 4px',
+                            fontSize: '10.5px',
+                            fontWeight: 700,
+                            color: 'var(--accent-primary)',
+                            background: 'rgba(0,0,0,0.4)',
+                            border: '1px solid rgba(255,255,255,0.15)',
+                            borderRadius: '4px',
+                            textAlign: 'right',
+                          }}
+                        />
                       </div>
                       <input
                         type="range"
@@ -3582,11 +3715,30 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
 
                     {/* Negros */}
                     <div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#ffffff', marginBottom: '2px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', color: '#ffffff', marginBottom: '2px' }}>
                         <span>Negros</span>
-                        <span style={{ fontWeight: 700, color: 'var(--accent-primary)' }}>
-                          {adjustDestination === 'artwork' ? blacks : blacksBg}
-                        </span>
+                        <input
+                          type="number"
+                          min="-100"
+                          max="100"
+                          value={adjustDestination === 'artwork' ? blacks : blacksBg}
+                          onChange={(e) => {
+                            const v = isNaN(parseInt(e.target.value)) ? 0 : Math.max(-100, Math.min(100, parseInt(e.target.value)));
+                            if (adjustDestination === 'artwork') setBlacks(v);
+                            else setBlacksBg(v);
+                          }}
+                          style={{
+                            width: '44px',
+                            padding: '1px 4px',
+                            fontSize: '10.5px',
+                            fontWeight: 700,
+                            color: 'var(--accent-primary)',
+                            background: 'rgba(0,0,0,0.4)',
+                            border: '1px solid rgba(255,255,255,0.15)',
+                            borderRadius: '4px',
+                            textAlign: 'right',
+                          }}
+                        />
                       </div>
                       <input
                         type="range"
@@ -3603,11 +3755,30 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
 
                     {/* Sombras */}
                     <div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#ffffff', marginBottom: '2px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', color: '#ffffff', marginBottom: '2px' }}>
                         <span>Sombras</span>
-                        <span style={{ fontWeight: 700, color: 'var(--accent-primary)' }}>
-                          {adjustDestination === 'artwork' ? shadowsTone : shadowsToneBg}
-                        </span>
+                        <input
+                          type="number"
+                          min="-100"
+                          max="100"
+                          value={adjustDestination === 'artwork' ? shadowsTone : shadowsToneBg}
+                          onChange={(e) => {
+                            const v = isNaN(parseInt(e.target.value)) ? 0 : Math.max(-100, Math.min(100, parseInt(e.target.value)));
+                            if (adjustDestination === 'artwork') setShadowsTone(v);
+                            else setShadowsToneBg(v);
+                          }}
+                          style={{
+                            width: '44px',
+                            padding: '1px 4px',
+                            fontSize: '10.5px',
+                            fontWeight: 700,
+                            color: 'var(--accent-primary)',
+                            background: 'rgba(0,0,0,0.4)',
+                            border: '1px solid rgba(255,255,255,0.15)',
+                            borderRadius: '4px',
+                            textAlign: 'right',
+                          }}
+                        />
                       </div>
                       <input
                         type="range"
@@ -3624,11 +3795,30 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
 
                     {/* Iluminaciones (Highlights) */}
                     <div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#ffffff', marginBottom: '2px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', color: '#ffffff', marginBottom: '2px' }}>
                         <span>Iluminaciones (Highlights)</span>
-                        <span style={{ fontWeight: 700, color: 'var(--accent-primary)' }}>
-                          {adjustDestination === 'artwork' ? highlights : highlightsBg}
-                        </span>
+                        <input
+                          type="number"
+                          min="-100"
+                          max="100"
+                          value={adjustDestination === 'artwork' ? highlights : highlightsBg}
+                          onChange={(e) => {
+                            const v = isNaN(parseInt(e.target.value)) ? 0 : Math.max(-100, Math.min(100, parseInt(e.target.value)));
+                            if (adjustDestination === 'artwork') setHighlights(v);
+                            else setHighlightsBg(v);
+                          }}
+                          style={{
+                            width: '44px',
+                            padding: '1px 4px',
+                            fontSize: '10.5px',
+                            fontWeight: 700,
+                            color: 'var(--accent-primary)',
+                            background: 'rgba(0,0,0,0.4)',
+                            border: '1px solid rgba(255,255,255,0.15)',
+                            borderRadius: '4px',
+                            textAlign: 'right',
+                          }}
+                        />
                       </div>
                       <input
                         type="range"
@@ -3645,11 +3835,30 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
 
                     {/* Blancos */}
                     <div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#ffffff', marginBottom: '2px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', color: '#ffffff', marginBottom: '2px' }}>
                         <span>Blancos</span>
-                        <span style={{ fontWeight: 700, color: 'var(--accent-primary)' }}>
-                          {adjustDestination === 'artwork' ? whites : whitesBg}
-                        </span>
+                        <input
+                          type="number"
+                          min="-100"
+                          max="100"
+                          value={adjustDestination === 'artwork' ? whites : whitesBg}
+                          onChange={(e) => {
+                            const v = isNaN(parseInt(e.target.value)) ? 0 : Math.max(-100, Math.min(100, parseInt(e.target.value)));
+                            if (adjustDestination === 'artwork') setWhites(v);
+                            else setWhitesBg(v);
+                          }}
+                          style={{
+                            width: '44px',
+                            padding: '1px 4px',
+                            fontSize: '10.5px',
+                            fontWeight: 700,
+                            color: 'var(--accent-primary)',
+                            background: 'rgba(0,0,0,0.4)',
+                            border: '1px solid rgba(255,255,255,0.15)',
+                            borderRadius: '4px',
+                            textAlign: 'right',
+                          }}
+                        />
                       </div>
                       <input
                         type="range"
@@ -3682,21 +3891,30 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                     {/* Temperatura */}
                     <div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#ffffff', marginBottom: '2px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', color: '#ffffff', marginBottom: '2px' }}>
                         <span>Temperatura</span>
-                        <span
-                          style={{
-                            fontWeight: 700,
-                            color:
-                              (adjustDestination === 'artwork' ? temperature : temperatureBg) > 0
-                                ? '#f59e0b'
-                                : (adjustDestination === 'artwork' ? temperature : temperatureBg) < 0
-                                ? '#38bdf8'
-                                : '#94a3b8',
+                        <input
+                          type="number"
+                          min="-100"
+                          max="100"
+                          value={adjustDestination === 'artwork' ? temperature : temperatureBg}
+                          onChange={(e) => {
+                            const v = isNaN(parseInt(e.target.value)) ? 0 : Math.max(-100, Math.min(100, parseInt(e.target.value)));
+                            if (adjustDestination === 'artwork') setTemperature(v);
+                            else setTemperatureBg(v);
                           }}
-                        >
-                          {adjustDestination === 'artwork' ? temperature : temperatureBg}
-                        </span>
+                          style={{
+                            width: '44px',
+                            padding: '1px 4px',
+                            fontSize: '10.5px',
+                            fontWeight: 700,
+                            color: (adjustDestination === 'artwork' ? temperature : temperatureBg) > 0 ? '#f59e0b' : (adjustDestination === 'artwork' ? temperature : temperatureBg) < 0 ? '#38bdf8' : '#94a3b8',
+                            background: 'rgba(0,0,0,0.4)',
+                            border: '1px solid rgba(255,255,255,0.15)',
+                            borderRadius: '4px',
+                            textAlign: 'right',
+                          }}
+                        />
                       </div>
                       <input
                         type="range"
@@ -3713,21 +3931,30 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
 
                     {/* Matiz / Tint */}
                     <div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#ffffff', marginBottom: '2px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', color: '#ffffff', marginBottom: '2px' }}>
                         <span>Tinte (Tint)</span>
-                        <span
-                          style={{
-                            fontWeight: 700,
-                            color:
-                              (adjustDestination === 'artwork' ? tint : tintBg) > 0
-                                ? '#de2367'
-                                : (adjustDestination === 'artwork' ? tint : tintBg) < 0
-                                ? '#10b981'
-                                : '#94a3b8',
+                        <input
+                          type="number"
+                          min="-100"
+                          max="100"
+                          value={adjustDestination === 'artwork' ? tint : tintBg}
+                          onChange={(e) => {
+                            const v = isNaN(parseInt(e.target.value)) ? 0 : Math.max(-100, Math.min(100, parseInt(e.target.value)));
+                            if (adjustDestination === 'artwork') setTint(v);
+                            else setTintBg(v);
                           }}
-                        >
-                          {adjustDestination === 'artwork' ? tint : tintBg}
-                        </span>
+                          style={{
+                            width: '44px',
+                            padding: '1px 4px',
+                            fontSize: '10.5px',
+                            fontWeight: 700,
+                            color: (adjustDestination === 'artwork' ? tint : tintBg) > 0 ? '#de2367' : (adjustDestination === 'artwork' ? tint : tintBg) < 0 ? '#10b981' : '#94a3b8',
+                            background: 'rgba(0,0,0,0.4)',
+                            border: '1px solid rgba(255,255,255,0.15)',
+                            borderRadius: '4px',
+                            textAlign: 'right',
+                          }}
+                        />
                       </div>
                       <input
                         type="range"
@@ -3744,11 +3971,30 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
 
                     {/* Saturación */}
                     <div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#ffffff', marginBottom: '2px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', color: '#ffffff', marginBottom: '2px' }}>
                         <span>Saturación</span>
-                        <span style={{ fontWeight: 700, color: 'var(--accent-primary)' }}>
-                          {adjustDestination === 'artwork' ? saturation : saturationBg}
-                        </span>
+                        <input
+                          type="number"
+                          min="-100"
+                          max="100"
+                          value={adjustDestination === 'artwork' ? saturation : saturationBg}
+                          onChange={(e) => {
+                            const v = isNaN(parseInt(e.target.value)) ? 0 : Math.max(-100, Math.min(100, parseInt(e.target.value)));
+                            if (adjustDestination === 'artwork') setSaturation(v);
+                            else setSaturationBg(v);
+                          }}
+                          style={{
+                            width: '44px',
+                            padding: '1px 4px',
+                            fontSize: '10.5px',
+                            fontWeight: 700,
+                            color: 'var(--accent-primary)',
+                            background: 'rgba(0,0,0,0.4)',
+                            border: '1px solid rgba(255,255,255,0.15)',
+                            borderRadius: '4px',
+                            textAlign: 'right',
+                          }}
+                        />
                       </div>
                       <input
                         type="range"
@@ -3765,11 +4011,30 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
 
                     {/* Tono / Hue */}
                     <div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#ffffff', marginBottom: '2px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', color: '#ffffff', marginBottom: '2px' }}>
                         <span>Tono (Hue)</span>
-                        <span style={{ fontWeight: 700, color: 'var(--accent-primary)' }}>
-                          {adjustDestination === 'artwork' ? hue : hueBg}º
-                        </span>
+                        <input
+                          type="number"
+                          min="-180"
+                          max="180"
+                          value={adjustDestination === 'artwork' ? hue : hueBg}
+                          onChange={(e) => {
+                            const v = isNaN(parseInt(e.target.value)) ? 0 : Math.max(-180, Math.min(180, parseInt(e.target.value)));
+                            if (adjustDestination === 'artwork') setHue(v);
+                            else setHueBg(v);
+                          }}
+                          style={{
+                            width: '44px',
+                            padding: '1px 4px',
+                            fontSize: '10.5px',
+                            fontWeight: 700,
+                            color: 'var(--accent-primary)',
+                            background: 'rgba(0,0,0,0.4)',
+                            border: '1px solid rgba(255,255,255,0.15)',
+                            borderRadius: '4px',
+                            textAlign: 'right',
+                          }}
+                        />
                       </div>
                       <input
                         type="range"
@@ -3786,11 +4051,30 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
 
                     {/* Viñeta */}
                     <div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#ffffff', marginBottom: '2px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', color: '#ffffff', marginBottom: '2px' }}>
                         <span>Viñeta</span>
-                        <span style={{ fontWeight: 700, color: 'var(--accent-primary)' }}>
-                          {adjustDestination === 'artwork' ? vignette : vignetteBg}%
-                        </span>
+                        <input
+                          type="number"
+                          min="0"
+                          max="100"
+                          value={adjustDestination === 'artwork' ? vignette : vignetteBg}
+                          onChange={(e) => {
+                            const v = isNaN(parseInt(e.target.value)) ? 0 : Math.max(0, Math.min(100, parseInt(e.target.value)));
+                            if (adjustDestination === 'artwork') setVignette(v);
+                            else setVignetteBg(v);
+                          }}
+                          style={{
+                            width: '44px',
+                            padding: '1px 4px',
+                            fontSize: '10.5px',
+                            fontWeight: 700,
+                            color: 'var(--accent-primary)',
+                            background: 'rgba(0,0,0,0.4)',
+                            border: '1px solid rgba(255,255,255,0.15)',
+                            borderRadius: '4px',
+                            textAlign: 'right',
+                          }}
+                        />
                       </div>
                       <input
                         type="range"
@@ -3883,7 +4167,7 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                       <Sun size={14} color="#f59e0b" />
                       <span style={{ fontSize: '11px', fontWeight: 700, color: '#ffffff' }}>
-                        💡 Focos de Luz 3D
+                        💡 Focos de Luz Solar 3D
                       </span>
                     </div>
                     <button
@@ -3957,16 +4241,40 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                   {selectedLight && (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', paddingTop: '6px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
                       <div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10.5px', color: '#ffffff', marginBottom: '2px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '10.5px', color: '#ffffff', marginBottom: '2px' }}>
                           <span>☀️ Intensidad Lumínica ({selectedLight.name || 'Foco'})</span>
-                          <span style={{ fontWeight: 700, color: 'var(--accent-primary)' }}>
-                            {selectedLight.intensity ?? 100}%
-                          </span>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                            <input
+                              type="number"
+                              min="0"
+                              max="250"
+                              value={selectedLight.intensity ?? 100}
+                              onChange={(e) => {
+                                const v = isNaN(parseInt(e.target.value)) ? 100 : Math.max(0, Math.min(250, parseInt(e.target.value)));
+                                setLightsList((prev) =>
+                                  prev.map((l) => (l.id === selectedLight.id ? { ...l, intensity: v } : l))
+                                );
+                                setSunIntensity(v);
+                              }}
+                              style={{
+                                width: '44px',
+                                padding: '1px 4px',
+                                fontSize: '10.5px',
+                                fontWeight: 700,
+                                color: 'var(--accent-primary)',
+                                background: 'rgba(0,0,0,0.4)',
+                                border: '1px solid rgba(255,255,255,0.15)',
+                                borderRadius: '4px',
+                                textAlign: 'right',
+                              }}
+                            />
+                            <span style={{ fontSize: '10.5px', color: '#94a3b8' }}>%</span>
+                          </div>
                         </div>
                         <input
                           type="range"
                           min="0"
-                          max="200"
+                          max="250"
                           step="5"
                           value={selectedLight.intensity ?? 100}
                           onChange={(e) => {
@@ -3987,8 +4295,8 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                           </div>
                           <input
                             type="range"
-                            min="0.05"
-                            max="0.95"
+                            min="0.02"
+                            max="0.98"
                             step="0.01"
                             value={selectedLight.x}
                             onChange={(e) => {
@@ -4007,8 +4315,8 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                           </div>
                           <input
                             type="range"
-                            min="0.05"
-                            max="0.95"
+                            min="0.02"
+                            max="0.98"
                             step="0.01"
                             value={selectedLight.y}
                             onChange={(e) => {
@@ -4073,7 +4381,7 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                   </div>
                 </div>
 
-                {/* 2. Selector de 8 Ventanales Arquitectónicos */}
+                {/* 2. Selector de 4 Ventanales Arquitectónicos Principales */}
                 <div
                   style={{
                     background: 'rgba(255, 255, 255, 0.03)',
@@ -4124,32 +4432,207 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                   </div>
                 </div>
 
-                {/* 3. Brillo de Reflejo */}
+                {/* 3. Lámpara Cálida (Interruptor Encendido / Apagado) */}
                 <div
                   style={{
                     background: 'rgba(255, 255, 255, 0.03)',
                     padding: '12px 14px',
                     borderRadius: '12px',
                     border: '1px solid rgba(255, 255, 255, 0.08)',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
                   }}
                 >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#ffffff', marginBottom: '4px' }}>
-                    <span style={{ fontWeight: 600 }}>☀️ Brillo de Reflejo</span>
-                    <span style={{ fontWeight: 700, color: 'var(--accent-primary)' }}>
-                      {Math.round(reflectionIntensity * 100)}%
-                    </span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '14px' }}>🏮</span>
+                    <div>
+                      <div style={{ fontSize: '11px', fontWeight: 600, color: '#ffffff' }}>
+                        Lámpara Cálida (2700K)
+                      </div>
+                      <div style={{ fontSize: '9.5px', color: '#94a3b8' }}>
+                        Acento de luz cálida combinable con cualquier estilo
+                      </div>
+                    </div>
                   </div>
-                  <input
-                    type="range"
-                    min="0.0"
-                    max="1.0"
-                    step="0.02"
-                    value={reflectionIntensity}
-                    onChange={(e) => setReflectionIntensity(parseFloat(e.target.value))}
-                  />
+                  <button
+                    onClick={() => {
+                      pushSnapshot();
+                      setWarmLampEnabled(!warmLampEnabled);
+                    }}
+                    style={{
+                      padding: '4px 12px',
+                      borderRadius: '8px',
+                      fontSize: '10.5px',
+                      fontWeight: 700,
+                      background: warmLampEnabled ? '#f59e0b' : 'rgba(255, 255, 255, 0.08)',
+                      border: warmLampEnabled ? '1px solid #fbbf24' : '1px solid rgba(255, 255, 255, 0.1)',
+                      color: warmLampEnabled ? '#1e1b4b' : '#94a3b8',
+                      cursor: 'pointer',
+                      boxShadow: warmLampEnabled ? '0 0 12px rgba(245, 158, 11, 0.6)' : 'none',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    {warmLampEnabled ? 'Encendida' : 'Apagada'}
+                  </button>
                 </div>
 
-                {/* 4. Luminaria de Techo Industrial */}
+                {/* 4. Brillo y Contraste de Reflejo */}
+                <div
+                  style={{
+                    background: 'rgba(255, 255, 255, 0.03)',
+                    padding: '12px 14px',
+                    borderRadius: '12px',
+                    border: '1px solid rgba(255, 255, 255, 0.08)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '8px',
+                  }}
+                >
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', color: '#ffffff', marginBottom: '2px' }}>
+                      <span style={{ fontWeight: 600 }}>☀️ Brillo de Reflejo</span>
+                      <input
+                        type="number"
+                        min="-50"
+                        max="50"
+                        value={reflectionBrightness}
+                        onChange={(e) => {
+                          const v = isNaN(parseInt(e.target.value)) ? 0 : Math.max(-50, Math.min(50, parseInt(e.target.value)));
+                          setReflectionBrightness(v);
+                        }}
+                        style={{
+                          width: '44px',
+                          padding: '1px 4px',
+                          fontSize: '10.5px',
+                          fontWeight: 700,
+                          color: 'var(--accent-primary)',
+                          background: 'rgba(0,0,0,0.4)',
+                          border: '1px solid rgba(255,255,255,0.15)',
+                          borderRadius: '4px',
+                          textAlign: 'right',
+                        }}
+                      />
+                    </div>
+                    <input
+                      type="range"
+                      min="-50"
+                      max="50"
+                      step="1"
+                      value={reflectionBrightness}
+                      onChange={(e) => setReflectionBrightness(parseInt(e.target.value))}
+                    />
+                  </div>
+
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', color: '#ffffff', marginBottom: '2px' }}>
+                      <span style={{ fontWeight: 600 }}>🌓 Contraste de Reflejo</span>
+                      <input
+                        type="number"
+                        min="-50"
+                        max="50"
+                        value={reflectionContrast}
+                        onChange={(e) => {
+                          const v = isNaN(parseInt(e.target.value)) ? 0 : Math.max(-50, Math.min(50, parseInt(e.target.value)));
+                          setReflectionContrast(v);
+                        }}
+                        style={{
+                          width: '44px',
+                          padding: '1px 4px',
+                          fontSize: '10.5px',
+                          fontWeight: 700,
+                          color: 'var(--accent-primary)',
+                          background: 'rgba(0,0,0,0.4)',
+                          border: '1px solid rgba(255,255,255,0.15)',
+                          borderRadius: '4px',
+                          textAlign: 'right',
+                        }}
+                      />
+                    </div>
+                    <input
+                      type="range"
+                      min="-50"
+                      max="50"
+                      step="1"
+                      value={reflectionContrast}
+                      onChange={(e) => setReflectionContrast(parseInt(e.target.value))}
+                    />
+                  </div>
+
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', color: '#ffffff', marginBottom: '2px' }}>
+                      <span style={{ fontWeight: 600 }}>🔍 Ancho / Escala del Ventanal</span>
+                      <input
+                        type="number"
+                        min="0.5"
+                        max="2.5"
+                        step="0.1"
+                        value={reflectionScale}
+                        onChange={(e) => {
+                          const v = isNaN(parseFloat(e.target.value)) ? 1.0 : Math.max(0.5, Math.min(2.5, parseFloat(e.target.value)));
+                          setReflectionScale(v);
+                        }}
+                        style={{
+                          width: '44px',
+                          padding: '1px 4px',
+                          fontSize: '10.5px',
+                          fontWeight: 700,
+                          color: 'var(--accent-primary)',
+                          background: 'rgba(0,0,0,0.4)',
+                          border: '1px solid rgba(255,255,255,0.15)',
+                          borderRadius: '4px',
+                          textAlign: 'right',
+                        }}
+                      />
+                    </div>
+                    <input
+                      type="range"
+                      min="0.5"
+                      max="2.5"
+                      step="0.05"
+                      value={reflectionScale}
+                      onChange={(e) => setReflectionScale(parseFloat(e.target.value))}
+                    />
+                  </div>
+
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', color: '#ffffff', marginBottom: '2px' }}>
+                      <span style={{ fontWeight: 600 }}>🌫️ Difuminado de Superficie (Rugosidad)</span>
+                      <input
+                        type="number"
+                        min="0.02"
+                        max="0.30"
+                        step="0.01"
+                        value={reflectionRoughness}
+                        onChange={(e) => {
+                          const v = isNaN(parseFloat(e.target.value)) ? 0.05 : Math.max(0.02, Math.min(0.30, parseFloat(e.target.value)));
+                          setReflectionRoughness(v);
+                        }}
+                        style={{
+                          width: '44px',
+                          padding: '1px 4px',
+                          fontSize: '10.5px',
+                          fontWeight: 700,
+                          color: 'var(--accent-primary)',
+                          background: 'rgba(0,0,0,0.4)',
+                          border: '1px solid rgba(255,255,255,0.15)',
+                          borderRadius: '4px',
+                          textAlign: 'right',
+                        }}
+                      />
+                    </div>
+                    <input
+                      type="range"
+                      min="0.02"
+                      max="0.30"
+                      step="0.01"
+                      value={reflectionRoughness}
+                      onChange={(e) => setReflectionRoughness(parseFloat(e.target.value))}
+                    />
+                  </div>
+                </div>
+
+                {/* 5. Luminaria de Techo Industrial */}
                 <div
                   style={{
                     background: 'rgba(255, 255, 255, 0.03)',
@@ -4229,7 +4712,7 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                   )}
                 </div>
 
-                {/* 5. Tonalidad & Clima del Mockup */}
+                {/* 6. Armonización Inteligente (Smart Match) */}
                 <div
                   style={{
                     background: 'rgba(255, 255, 255, 0.03)',
@@ -4238,54 +4721,50 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                     border: '1px solid rgba(255, 255, 255, 0.08)',
                   }}
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
-                    <CloudSun size={13} color="var(--accent-primary)" />
-                    <span style={{ fontSize: '11px', fontWeight: 600, color: '#ffffff' }}>
-                      🌤️ Tonalidad & Clima del Mockup
-                    </span>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span style={{ fontSize: '13px' }}>🎛️</span>
+                      <span style={{ fontSize: '11px', fontWeight: 600, color: '#ffffff' }}>
+                        Armonización Inteligente (Smart Match)
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        value={wallHarmonization}
+                        onChange={(e) => {
+                          const v = isNaN(parseInt(e.target.value)) ? 0 : Math.max(0, Math.min(100, parseInt(e.target.value)));
+                          setWallHarmonization(v);
+                        }}
+                        style={{
+                          width: '42px',
+                          padding: '1px 4px',
+                          fontSize: '10.5px',
+                          fontWeight: 700,
+                          color: 'var(--accent-primary)',
+                          background: 'rgba(0,0,0,0.4)',
+                          border: '1px solid rgba(255,255,255,0.15)',
+                          borderRadius: '4px',
+                          textAlign: 'right',
+                        }}
+                      />
+                      <span style={{ fontSize: '10.5px', color: '#94a3b8' }}>%</span>
+                    </div>
                   </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '3px' }}>
-                    {[
-                      { id: 'day', name: 'Mañana', icon: '☀️' },
-                      { id: 'sunset', name: 'Cálida', icon: '🌇' },
-                      { id: 'night', name: 'Noche', icon: '🌙' },
-                      { id: 'sunny', name: 'Soleado', icon: '✨' },
-                      { id: 'cloudy', name: 'Nublado', icon: '☁️' },
-                    ].map((w) => {
-                      const isSel = weatherPreset === w.id;
-                      return (
-                        <button
-                          key={w.id}
-                          onClick={() => {
-                            pushSnapshot();
-                            setWeatherPreset(w.id as WeatherPreset);
-                          }}
-                          style={{
-                            padding: '6px 2px',
-                            borderRadius: '6px',
-                            fontSize: '9.5px',
-                            fontWeight: isSel ? 700 : 500,
-                            border: isSel ? '1px solid var(--accent-primary)' : '1px solid rgba(255,255,255,0.06)',
-                            background: isSel ? 'var(--accent-primary-subtle)' : 'rgba(255,255,255,0.03)',
-                            color: isSel ? '#ffffff' : '#94a3b8',
-                            cursor: 'pointer',
-                            display: 'flex',
-                            flexDirection: 'column',
-                            alignItems: 'center',
-                            gap: '2px',
-                          }}
-                        >
-                          <span>{w.icon}</span>
-                          <span>{w.name}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
+                  <input
+                    type="range"
+                    min="0"
+                    max="100"
+                    value={wallHarmonization}
+                    onChange={(e) => setWallHarmonization(parseInt(e.target.value))}
+                  />
                 </div>
               </div>
             )}
 
-            {/* TAB 4: SHADOWS (SIMPLIFIED & CLEAN) */}
+            {/* TAB 4: SHADOWS (DUAL-DIRECTION & PROJECTION DISTANCE) */}
             {activeTab === 'shadow' && (
               <div
                 style={{
@@ -4295,118 +4774,314 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                   border: '1px solid rgba(255, 255, 255, 0.08)',
                   display: 'flex',
                   flexDirection: 'column',
-                  gap: '12px',
+                  gap: '10px',
                   maxHeight: '440px',
                   overflowY: 'auto',
                 }}
               >
-                <span style={{ fontSize: '11px', fontWeight: 600, color: '#ffffff' }}>
-                  Estilo de Sombra en Pared
-                </span>
-
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px' }}>
-                  {CANVA_SHADOW_OPTIONS.map((opt) => {
-                    const isSel = shadowPreset === opt.id;
-                    return (
-                      <button
-                        key={opt.id}
-                        onClick={() => {
-                          pushSnapshot();
-                          setShadowPreset(opt.id);
+                {/* 1. Dirección en Ángulo (0° a 360°) */}
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '3px' }}>
+                    <span style={{ fontSize: '11px', fontWeight: 600, color: '#ffffff' }}>
+                      🧭 Dirección de Sombra (Ángulo 360°)
+                    </span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <input
+                        type="number"
+                        min="0"
+                        max="360"
+                        value={shadowAngleDeg}
+                        onChange={(e) => {
+                          const v = isNaN(parseInt(e.target.value)) ? 0 : Math.max(0, Math.min(360, parseInt(e.target.value)));
+                          setShadowAngleDeg(v);
                         }}
                         style={{
-                          padding: '8px 2px',
-                          borderRadius: '8px',
-                          border: isSel ? '1.5px solid var(--accent-primary)' : '1px solid rgba(255,255,255,0.08)',
-                          background: isSel ? 'var(--accent-primary-subtle)' : 'rgba(255,255,255,0.03)',
-                          color: isSel ? '#ffffff' : '#94a3b8',
-                          fontSize: '10px',
-                          fontWeight: isSel ? 700 : 500,
+                          width: '44px',
+                          padding: '1px 4px',
+                          fontSize: '10.5px',
+                          fontWeight: 700,
+                          color: 'var(--accent-primary)',
+                          background: 'rgba(0,0,0,0.4)',
+                          border: '1px solid rgba(255,255,255,0.15)',
+                          borderRadius: '4px',
+                          textAlign: 'right',
+                        }}
+                      />
+                      <span style={{ fontSize: '10.5px', color: '#94a3b8' }}>°</span>
+                    </div>
+                  </div>
+                  <input
+                    type="range"
+                    min="0"
+                    max="360"
+                    step="1"
+                    value={shadowAngleDeg}
+                    onChange={(e) => setShadowAngleDeg(parseInt(e.target.value))}
+                    style={{ marginBottom: '6px' }}
+                  />
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '4px' }}>
+                    {[
+                      { label: '0°', val: 0 },
+                      { label: '90° (Abajo)', val: 90 },
+                      { label: '135° (Diag)', val: 135 },
+                      { label: '180° (Izq)', val: 180 },
+                      { label: '270° (Arr)', val: 270 },
+                    ].map((btn) => (
+                      <button
+                        key={btn.label}
+                        onClick={() => {
+                          pushSnapshot();
+                          setShadowAngleDeg(btn.val);
+                        }}
+                        style={{
+                          padding: '3px 2px',
+                          borderRadius: '6px',
+                          fontSize: '9.5px',
+                          fontWeight: shadowAngleDeg === btn.val ? 700 : 500,
+                          background: shadowAngleDeg === btn.val ? 'var(--accent-primary-subtle)' : 'rgba(255,255,255,0.04)',
+                          border: shadowAngleDeg === btn.val ? '1px solid var(--accent-primary)' : '1px solid rgba(255,255,255,0.08)',
+                          color: shadowAngleDeg === btn.val ? '#ffffff' : '#94a3b8',
                           cursor: 'pointer',
-                          display: 'flex',
-                          flexDirection: 'column',
-                          alignItems: 'center',
-                          gap: '4px',
                         }}
                       >
-                        <div
-                          style={{
-                            width: '22px',
-                            height: '22px',
-                            borderRadius: '4px',
-                            background: '#f43f7e',
-                            boxShadow:
-                              opt.id === 'parallel'
-                                ? '2px 3px 5px rgba(0,0,0,0.8)'
-                                : opt.id === 'glow'
-                                ? '0 0 6px rgba(0,0,0,0.8)'
-                                : opt.id === 'curved'
-                                ? '0 4px 3px rgba(0,0,0,0.7)'
-                                : 'none',
-                          }}
-                        />
-                        <span>{opt.name}</span>
+                        {btn.label}
                       </button>
-                    );
-                  })}
+                    ))}
+                  </div>
                 </div>
 
-                {shadowPreset !== 'none' && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                    {/* 1. Intensidad de Sombra (0% a 100%) */}
-                    <div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '3px' }}>
-                        <span style={{ fontSize: '11px', color: '#ffffff' }}>Intensidad de Sombra</span>
-                        <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--accent-primary)' }}>
-                          {shadowIntensity}%
-                        </span>
-                      </div>
+                {/* 2. Desplazamiento Manual Dual: Horizontal (X) y Vertical (Y) */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '10.5px', color: '#ffffff', marginBottom: '2px' }}>
+                      <span>↔ Desplazamiento X</span>
                       <input
-                        type="range"
+                        type="number"
+                        min="-100"
+                        max="100"
+                        value={shadowOffsetX}
+                        onChange={(e) => {
+                          const v = isNaN(parseInt(e.target.value)) ? 0 : Math.max(-100, Math.min(100, parseInt(e.target.value)));
+                          setShadowOffsetX(v);
+                        }}
+                        style={{
+                          width: '42px',
+                          padding: '1px 4px',
+                          fontSize: '10px',
+                          fontWeight: 700,
+                          color: 'var(--accent-primary)',
+                          background: 'rgba(0,0,0,0.4)',
+                          border: '1px solid rgba(255,255,255,0.15)',
+                          borderRadius: '4px',
+                          textAlign: 'right',
+                        }}
+                      />
+                    </div>
+                    <input
+                      type="range"
+                      min="-100"
+                      max="100"
+                      value={shadowOffsetX}
+                      onChange={(e) => setShadowOffsetX(parseInt(e.target.value))}
+                    />
+                  </div>
+
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '10.5px', color: '#ffffff', marginBottom: '2px' }}>
+                      <span>↕ Desplazamiento Y</span>
+                      <input
+                        type="number"
+                        min="-100"
+                        max="100"
+                        value={shadowOffsetY}
+                        onChange={(e) => {
+                          const v = isNaN(parseInt(e.target.value)) ? 0 : Math.max(-100, Math.min(100, parseInt(e.target.value)));
+                          setShadowOffsetY(v);
+                        }}
+                        style={{
+                          width: '42px',
+                          padding: '1px 4px',
+                          fontSize: '10px',
+                          fontWeight: 700,
+                          color: 'var(--accent-primary)',
+                          background: 'rgba(0,0,0,0.4)',
+                          border: '1px solid rgba(255,255,255,0.15)',
+                          borderRadius: '4px',
+                          textAlign: 'right',
+                        }}
+                      />
+                    </div>
+                    <input
+                      type="range"
+                      min="-100"
+                      max="100"
+                      value={shadowOffsetY}
+                      onChange={(e) => setShadowOffsetY(parseInt(e.target.value))}
+                    />
+                  </div>
+                </div>
+
+                {/* 3. Distancia de Proyección (0 a 100) */}
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '3px' }}>
+                    <div>
+                      <span style={{ fontSize: '11px', fontWeight: 600, color: '#ffffff' }}>
+                        📏 Distancia de Proyección
+                      </span>
+                      {shadowDistance === 0 && (
+                        <span style={{ fontSize: '9.5px', color: '#22c55e', marginLeft: '6px' }}>
+                          (Pegada al marco / 0 offset)
+                        </span>
+                      )}
+                    </div>
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      value={shadowDistance}
+                      onChange={(e) => {
+                        const v = isNaN(parseInt(e.target.value)) ? 0 : Math.max(0, Math.min(100, parseInt(e.target.value)));
+                        setShadowDistance(v);
+                      }}
+                      style={{
+                        width: '44px',
+                        padding: '1px 4px',
+                        fontSize: '10.5px',
+                        fontWeight: 700,
+                        color: shadowDistance === 0 ? '#22c55e' : 'var(--accent-primary)',
+                        background: 'rgba(0,0,0,0.4)',
+                        border: '1px solid rgba(255,255,255,0.15)',
+                        borderRadius: '4px',
+                        textAlign: 'right',
+                      }}
+                    />
+                  </div>
+                  <input
+                    type="range"
+                    min="0"
+                    max="100"
+                    value={shadowDistance}
+                    onChange={(e) => setShadowDistance(parseInt(e.target.value))}
+                  />
+                </div>
+
+                {/* 4. Fuerza / Intensidad de Sombra (0% a 100%) */}
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '3px' }}>
+                    <span style={{ fontSize: '11px', color: '#ffffff' }}>💪 Fuerza de Sombra</span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <input
+                        type="number"
                         min="0"
                         max="100"
                         value={shadowIntensity}
-                        onChange={(e) => setShadowIntensity(parseInt(e.target.value))}
+                        onChange={(e) => {
+                          const v = isNaN(parseInt(e.target.value)) ? 0 : Math.max(0, Math.min(100, parseInt(e.target.value)));
+                          setShadowIntensity(v);
+                        }}
+                        style={{
+                          width: '44px',
+                          padding: '1px 4px',
+                          fontSize: '10.5px',
+                          fontWeight: 700,
+                          color: 'var(--accent-primary)',
+                          background: 'rgba(0,0,0,0.4)',
+                          border: '1px solid rgba(255,255,255,0.15)',
+                          borderRadius: '4px',
+                          textAlign: 'right',
+                        }}
                       />
+                      <span style={{ fontSize: '10.5px', color: '#94a3b8' }}>%</span>
                     </div>
+                  </div>
+                  <input
+                    type="range"
+                    min="0"
+                    max="100"
+                    value={shadowIntensity}
+                    onChange={(e) => setShadowIntensity(parseInt(e.target.value))}
+                  />
+                </div>
 
-                    {/* 2. Difuminación / Suavizado (Blur) (0% a 100%) */}
-                    <div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '3px' }}>
-                        <span style={{ fontSize: '11px', color: '#ffffff' }}>Difuminación / Suavizado (Blur)</span>
-                        <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--accent-primary)' }}>
-                          {shadowBlur <= 15 ? `${shadowBlur}% (Nítida)` : shadowBlur >= 65 ? `${shadowBlur}% (Difusa)` : `${shadowBlur}%`}
-                        </span>
-                      </div>
+                {/* 5. Difuminación / Desenfoque (Blur) (0% a 100%) */}
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '3px' }}>
+                    <span style={{ fontSize: '11px', color: '#ffffff' }}>
+                      🌫️ Difuminación / Desenfoque ({shadowBlur <= 15 ? 'Nítida' : shadowBlur >= 65 ? 'Ultra Difusa' : 'Suave'})
+                    </span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                       <input
-                        type="range"
+                        type="number"
                         min="0"
                         max="100"
                         value={shadowBlur}
-                        onChange={(e) => setShadowBlur(parseInt(e.target.value))}
+                        onChange={(e) => {
+                          const v = isNaN(parseInt(e.target.value)) ? 0 : Math.max(0, Math.min(100, parseInt(e.target.value)));
+                          setShadowBlur(v);
+                        }}
+                        style={{
+                          width: '44px',
+                          padding: '1px 4px',
+                          fontSize: '10.5px',
+                          fontWeight: 700,
+                          color: 'var(--accent-primary)',
+                          background: 'rgba(0,0,0,0.4)',
+                          border: '1px solid rgba(255,255,255,0.15)',
+                          borderRadius: '4px',
+                          textAlign: 'right',
+                        }}
                       />
+                      <span style={{ fontSize: '10.5px', color: '#94a3b8' }}>%</span>
                     </div>
+                  </div>
+                  <input
+                    type="range"
+                    min="0"
+                    max="100"
+                    value={shadowBlur}
+                    onChange={(e) => setShadowBlur(parseInt(e.target.value))}
+                  />
+                </div>
 
-                    {/* 3. Sombra de Contacto (si está en repisa o personalizada) */}
-                    <div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '3px' }}>
-                        <span style={{ fontSize: '11px', color: '#ffffff' }}>
-                          {placementMode === 'shelf' ? '🪵 Sombra de Contacto en Repisa' : 'Sombra de Contacto'}
-                        </span>
-                        <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--accent-primary)' }}>
-                          {shadowContactOcclusion}%
-                        </span>
-                      </div>
+                {/* 6. Sombra de Contacto */}
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '3px' }}>
+                    <span style={{ fontSize: '11px', color: '#ffffff' }}>
+                      {placementMode === 'shelf' ? '🪵 Sombra de Oclusión en Base' : 'Sombra de Contacto'}
+                    </span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                       <input
-                        type="range"
+                        type="number"
                         min="0"
                         max="100"
                         value={shadowContactOcclusion}
-                        onChange={(e) => setShadowContactOcclusion(parseInt(e.target.value))}
+                        onChange={(e) => {
+                          const v = isNaN(parseInt(e.target.value)) ? 0 : Math.max(0, Math.min(100, parseInt(e.target.value)));
+                          setShadowContactOcclusion(v);
+                        }}
+                        style={{
+                          width: '44px',
+                          padding: '1px 4px',
+                          fontSize: '10.5px',
+                          fontWeight: 700,
+                          color: 'var(--accent-primary)',
+                          background: 'rgba(0,0,0,0.4)',
+                          border: '1px solid rgba(255,255,255,0.15)',
+                          borderRadius: '4px',
+                          textAlign: 'right',
+                        }}
                       />
+                      <span style={{ fontSize: '10.5px', color: '#94a3b8' }}>%</span>
                     </div>
                   </div>
-                )}
+                  <input
+                    type="range"
+                    min="0"
+                    max="100"
+                    value={shadowContactOcclusion}
+                    onChange={(e) => setShadowContactOcclusion(parseInt(e.target.value))}
+                  />
+                </div>
               </div>
             )}
 

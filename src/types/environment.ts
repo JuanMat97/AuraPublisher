@@ -105,10 +105,16 @@ export interface MockupPosition {
   invert?: boolean;
   ceilingLightsEnabled?: boolean;
   ceilingLightTemp?: 'warm' | 'neutral' | 'cool';
-  sunIntensity?: number; // 0..200, default 100
+  warmLampEnabled?: boolean;
+  sunIntensity?: number; // 0..250, default 100
   isWallAnchored?: boolean;
   wallCalibratedAngle?: number;
   wallCalibratedPitch?: number;
+  wallGridZ?: number;
+  wallGridScale?: number;
+  wallGridOffsetX?: number;
+  wallGridOffsetY?: number;
+  wallGridQuad?: PerspectiveQuad;
   isSnappingEnabled?: boolean;
   adjust?: import('./catalog').CanvaImageAdjustOptions;
   adjustBg?: import('./catalog').CanvaImageAdjustOptions;

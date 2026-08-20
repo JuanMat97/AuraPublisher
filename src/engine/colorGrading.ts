@@ -67,11 +67,11 @@ export function buildToneCurveLUT(options: CanvaImageAdjustOptions = {}): ToneCu
 
   // 1. Precalculate parameter multipliers
   const bCutoff = (blacks / 100) * (40 / 255);
-  const sWeightFactor = (shadowsTone / 100) * 0.32;
+  const sWeightFactor = (shadowsTone / 100) * 0.48;
   const brNorm = brightness / 100;
   const gammaExp = brNorm !== 0 ? Math.pow(2, -brNorm * 0.85) : 1;
   const cNorm = contrast / 100;
-  const hWeightFactor = (highlights / 100) * 0.32;
+  const hWeightFactor = (highlights / 100) * 0.42;
   const wNorm = whites / 100;
   const wGain = (wNorm * 40) / 255;
 
@@ -100,10 +100,10 @@ export function buildToneCurveLUT(options: CanvaImageAdjustOptions = {}): ToneCu
       x = Math.max(0, (x + bCutoff) / (1 + bCutoff));
     }
 
-    // B. Shadows Toe Curve (luminance 0.1..0.45, preserving black point 0)
-    if (sWeightFactor !== 0 && x > 0 && x < 0.55) {
-      const normX = x / 0.55;
-      const toeWeight = Math.sin(Math.PI * normX) * (1 - normX * 0.35);
+    // B. Shadows Toe Curve (luminance 0.0..0.65, smooth parabolic lift/darken)
+    if (sWeightFactor !== 0 && x >= 0 && x < 0.65) {
+      const normX = x / 0.65;
+      const toeWeight = Math.sin(Math.PI * normX) * (1.2 - normX * 0.35);
       x = Math.max(0, Math.min(1, x + sWeightFactor * toeWeight));
     }
 
@@ -121,9 +121,9 @@ export function buildToneCurveLUT(options: CanvaImageAdjustOptions = {}): ToneCu
     }
     x = Math.max(0, Math.min(1, x));
 
-    // E. Highlights: Shoulder Curve compressing/boosting bright tones (0.55..0.95)
-    if (hWeightFactor !== 0 && x > 0.45 && x < 1.0) {
-      const normH = (x - 0.45) / 0.55;
+    // E. Highlights: Shoulder Curve compressing/boosting bright tones (0.45..1.0)
+    if (hWeightFactor !== 0 && x > 0.40 && x <= 1.0) {
+      const normH = (x - 0.40) / 0.60;
       const shoulderWeight = Math.sin(Math.PI * normH);
       x = Math.max(0, Math.min(1, x + hWeightFactor * shoulderWeight));
     }

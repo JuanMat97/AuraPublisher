@@ -55,24 +55,53 @@ export async function getEdgeTextures(
   if (cache.has(key)) return cache.get(key);
   const img = await loadImage(url);
   if (!img) return null;
-  const mk = (sx: number, sy: number, sw: number, sh: number, dw: number, dh: number) => {
+  const mk = (sx: number, sy: number, sw: number, sh: number, dw: number, dh: number, isVertical: boolean) => {
     const c = document.createElement('canvas');
     c.width = dw;
     c.height = dh;
-    c.getContext('2d')!.drawImage(img, sx, sy, sw, sh, 0, 0, dw, dh);
+    const ctx = c.getContext('2d')!;
+
+    // 1. Internal light refraction from artwork border
+    ctx.drawImage(img, sx, sy, sw, sh, 0, 0, dw, dh);
+
+    // 2. Acrylic / Resin internal glass dispersion & vibrance boost
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
+    ctx.fillRect(0, 0, dw, dh);
+
+    // 3. Polished Crystal Chamfer Bevel Highlight (Front Edge Filo Especular)
+    if (isVertical) {
+      // For left/right edges (dw is thickness, dh is height)
+      const bevelGrad = ctx.createLinearGradient(0, 0, dw, 0);
+      bevelGrad.addColorStop(0, 'rgba(255, 255, 255, 0.75)'); // Crisp front highlight line
+      bevelGrad.addColorStop(0.15, 'rgba(255, 255, 255, 0.25)');
+      bevelGrad.addColorStop(0.5, 'rgba(0, 0, 0, 0.15)'); // Glass core
+      bevelGrad.addColorStop(1, 'rgba(0, 0, 0, 0.45)'); // Back absorption
+      ctx.fillStyle = bevelGrad;
+      ctx.fillRect(0, 0, dw, dh);
+    } else {
+      // For top/bottom edges (dw is width, dh is thickness)
+      const bevelGrad = ctx.createLinearGradient(0, 0, 0, dh);
+      bevelGrad.addColorStop(0, 'rgba(255, 255, 255, 0.75)'); // Crisp front highlight line
+      bevelGrad.addColorStop(0.15, 'rgba(255, 255, 255, 0.25)');
+      bevelGrad.addColorStop(0.5, 'rgba(0, 0, 0, 0.15)');
+      bevelGrad.addColorStop(1, 'rgba(0, 0, 0, 0.45)');
+      ctx.fillStyle = bevelGrad;
+      ctx.fillRect(0, 0, dw, dh);
+    }
+
     const tex = new THREE.CanvasTexture(c);
     tex.colorSpace = THREE.SRGBColorSpace;
     return tex;
   };
   const W = img.naturalWidth;
   const H = img.naturalHeight;
-  const horizStripPx = Math.max(4, Math.round((W * panelThicknessCm) / panelWidthCm));
-  const vertStripPx = Math.max(4, Math.round((H * panelThicknessCm) / panelHeightCm));
+  const horizStripPx = Math.max(8, Math.round((W * panelThicknessCm) / panelWidthCm));
+  const vertStripPx = Math.max(8, Math.round((H * panelThicknessCm) / panelHeightCm));
   const out = [
-    mk(W - horizStripPx, 0, horizStripPx, H, horizStripPx, 256),
-    mk(0, 0, horizStripPx, H, horizStripPx, 256),
-    mk(0, 0, W, vertStripPx, 256, vertStripPx),
-    mk(0, H - vertStripPx, W, vertStripPx, 256, vertStripPx),
+    mk(W - horizStripPx, 0, horizStripPx, H, horizStripPx, 512, true),
+    mk(0, 0, horizStripPx, H, horizStripPx, 512, true),
+    mk(0, 0, W, vertStripPx, 512, vertStripPx, false),
+    mk(0, H - vertStripPx, W, vertStripPx, 512, vertStripPx, false),
   ];
   cache.set(key, out);
   return out;
