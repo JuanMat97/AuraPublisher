@@ -27,9 +27,13 @@ export type WeatherPreset =
 export type PlacementMode = 'wall' | 'shelf';
 
 export interface LightSource3D {
+  id: string;
+  name?: string;
   x: number;
   y: number;
   z: number;
+  intensity: number; // 0..200 (default 100)
+  color?: string;
 }
 
 export type ReflectionType =
@@ -51,6 +55,7 @@ export interface MockupPosition {
   id: string;
   name: string;
   quad: PerspectiveQuad;
+  wallQuad?: PerspectiveQuad;
   centerX?: number;
   centerY?: number;
   scaleWidth?: number;
@@ -60,8 +65,9 @@ export interface MockupPosition {
   shadowOffsetY?: number;
   // Per-environment optical and spatial overrides. The product finish remains global.
   placementMode?: PlacementMode;
-  lightPos3D?: LightSource3D;
-  lightSource3D?: LightSource3D;
+  lightPos3D?: LightSource3D | { x: number; y: number; z: number };
+  lightSource3D?: LightSource3D | { x: number; y: number; z: number };
+  lightsList?: LightSource3D[];
   wallAngle?: number;
   pitchDeg?: number;
   rollDeg?: number;
@@ -78,7 +84,9 @@ export interface MockupPosition {
   reflectionContrast?: number;
   weatherPreset?: WeatherPreset;
   shelfContactShadow?: boolean;
+  /** @deprecated Use ambient lighting and color adjustments instead */
   wallHarmonization?: number;
+  vignette?: number;
   shadowPreset?: import('./catalog').CanvaShadowPreset;
   shadowStyleIntensity?: number;
   shadowAngleDeg?: number;
@@ -101,7 +109,10 @@ export interface MockupPosition {
   isWallAnchored?: boolean;
   wallCalibratedAngle?: number;
   wallCalibratedPitch?: number;
+  isSnappingEnabled?: boolean;
   adjust?: import('./catalog').CanvaImageAdjustOptions;
+  adjustBg?: import('./catalog').CanvaImageAdjustOptions;
+  bgAdjust?: import('./catalog').CanvaImageAdjustOptions;
 }
 
 export type EnvironmentPosition = MockupPosition;

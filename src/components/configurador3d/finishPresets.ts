@@ -11,11 +11,11 @@ export interface FinishMetadata {
 
 export const finishPresets: Record<string, FinishMetadata> = {
   mate: {
-    roughness: 0.45,
-    clearcoat: 0.28,
-    clearcoatRoughness: 0.18,
-    envMapIntensity: 0.85,
-    specularIntensity: 0.85,
+    roughness: 0.42,
+    clearcoat: 0.30,
+    clearcoatRoughness: 0.15,
+    envMapIntensity: 0.90,
+    specularIntensity: 0.90,
     iridescence: 0,
   },
   brillante: {
@@ -38,12 +38,12 @@ export const finishPresets: Record<string, FinishMetadata> = {
 };
 
 export const RESIN_OVERLAY: FinishMetadata = {
-  roughness: 0.005,
+  roughness: 0.002,
   clearcoat: 1.0,
-  clearcoatRoughness: 0.005,
-  envMapIntensity: 5.0,
-  specularIntensity: 2.6,
-  colorBoost: 1.06,
+  clearcoatRoughness: 0.002,
+  envMapIntensity: 6.0,
+  specularIntensity: 3.0,
+  colorBoost: 1.08,
 };
 
 export const FINISH_LIST = [

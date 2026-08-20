@@ -7,9 +7,16 @@ import {
   CanvaShadowPreset,
   CanvaImageAdjustOptions,
 } from '../types/catalog';
+import { LightSource3D, PerspectiveQuad } from '../types/environment';
 import { finishPresets, RESIN_OVERLAY } from '../components/configurador3d/finishPresets';
+import {
+  applyColorGrading,
+  applyCanvaAdjustmentsToCanvas,
+  isAdjustDefault,
+} from './colorGrading';
 
 export type { CanvaImageAdjustOptions };
+export { applyColorGrading, applyCanvaAdjustmentsToCanvas, isAdjustDefault };
 
 export function getReflectionTypeForEnvironment(category?: string): ReflectionType {
   if (category === 'galeria') return 'gallery_track';
@@ -47,14 +54,95 @@ export function getNeutralSurfaceSettings(
   // Resin is intentionally colourless. Do not apply the vinyl's iridescence
   // here: the real tornasolado workflow will use its own production mask.
   return {
-    roughness: RESIN_OVERLAY.roughness ?? 0.005,
+    roughness: RESIN_OVERLAY.roughness ?? 0.002,
     clearcoat: (RESIN_OVERLAY.clearcoat ?? 1.0) * strength,
-    clearcoatRoughness: RESIN_OVERLAY.clearcoatRoughness ?? 0.005,
-    envMapIntensity: (RESIN_OVERLAY.envMapIntensity ?? 5.0) * strength,
-    specularIntensity: (RESIN_OVERLAY.specularIntensity ?? 2.6) * strength,
+    clearcoatRoughness: RESIN_OVERLAY.clearcoatRoughness ?? 0.002,
+    envMapIntensity: (RESIN_OVERLAY.envMapIntensity ?? 6.0) * strength,
+    specularIntensity: (RESIN_OVERLAY.specularIntensity ?? 3.0) * strength,
     iridescence: 0,
     iridescenceIOR: 1.3,
   };
+}
+
+/**
+ * Generates a 3D line wireframe grid with true converging vanishing perspective between the 4 corners of wallQuad.
+ */
+export function createWallQuadGridGeometry(
+  wallQuad: PerspectiveQuad,
+  bgW: number,
+  bgH: number,
+  divisions = 16
+): THREE.BufferGeometry {
+  const pTL = new THREE.Vector3((wallQuad.topLeft.x - 0.5) * bgW, -(wallQuad.topLeft.y - 0.5) * bgH, 0.002);
+  const pTR = new THREE.Vector3((wallQuad.topRight.x - 0.5) * bgW, -(wallQuad.topRight.y - 0.5) * bgH, 0.002);
+  const pBR = new THREE.Vector3((wallQuad.bottomRight.x - 0.5) * bgW, -(wallQuad.bottomRight.y - 0.5) * bgH, 0.002);
+  const pBL = new THREE.Vector3((wallQuad.bottomLeft.x - 0.5) * bgW, -(wallQuad.bottomLeft.y - 0.5) * bgH, 0.002);
+
+  const gridPoints: THREE.Vector3[] = [];
+  // Converging vertical lines from top edge to bottom edge
+  for (let i = 0; i <= divisions; i++) {
+    const u = i / divisions;
+    const top = pTL.clone().lerp(pTR, u);
+    const bot = pBL.clone().lerp(pBR, u);
+    gridPoints.push(top, bot);
+  }
+  // Converging horizontal lines from left edge to right edge
+  for (let j = 0; j <= divisions; j++) {
+    const v = j / divisions;
+    const left = pTL.clone().lerp(pBL, v);
+    const right = pTR.clone().lerp(pBR, v);
+    gridPoints.push(left, right);
+  }
+
+  return new THREE.BufferGeometry().setFromPoints(gridPoints);
+}
+
+/**
+ * Draws true converging vanishing perspective grid lines on a 2D canvas context.
+ */
+export function drawPerspectiveWallGrid(
+  ctx: CanvasRenderingContext2D,
+  wallQuad: PerspectiveQuad,
+  width: number,
+  height: number,
+  divisions = 16,
+  strokeColor = 'rgba(56, 189, 248, 0.4)',
+  lineWidth = 1.5
+) {
+  const pTL = { x: wallQuad.topLeft.x * width, y: wallQuad.topLeft.y * height };
+  const pTR = { x: wallQuad.topRight.x * width, y: wallQuad.topRight.y * height };
+  const pBR = { x: wallQuad.bottomRight.x * width, y: wallQuad.bottomRight.y * height };
+  const pBL = { x: wallQuad.bottomLeft.x * width, y: wallQuad.bottomLeft.y * height };
+
+  ctx.save();
+  ctx.strokeStyle = strokeColor;
+  ctx.lineWidth = lineWidth;
+  ctx.beginPath();
+
+  // Vertical lines from top to bottom
+  for (let i = 0; i <= divisions; i++) {
+    const u = i / divisions;
+    const tx = pTL.x + u * (pTR.x - pTL.x);
+    const ty = pTL.y + u * (pTR.y - pTL.y);
+    const bx = pBL.x + u * (pBR.x - pBL.x);
+    const by = pBL.y + u * (pBR.y - pBL.y);
+    ctx.moveTo(tx, ty);
+    ctx.lineTo(bx, by);
+  }
+
+  // Horizontal lines from left to right
+  for (let j = 0; j <= divisions; j++) {
+    const v = j / divisions;
+    const lx = pTL.x + v * (pBL.x - pTL.x);
+    const ly = pTL.y + v * (pBL.y - pTL.y);
+    const rx = pTR.x + v * (pBR.x - pTR.x);
+    const ry = pTR.y + v * (pBR.y - pTR.y);
+    ctx.moveTo(lx, ly);
+    ctx.lineTo(rx, ry);
+  }
+
+  ctx.stroke();
+  ctx.restore();
 }
 
 export interface RenderWebGLRoomOptions {
@@ -71,6 +159,7 @@ export interface RenderWebGLRoomOptions {
   scaleWidth?: number; // 0.05..0.90 (default 0.42)
   placementMode?: 'wall' | 'shelf';
   lightSource3D?: { x: number; y: number; z: number };
+  lightsList?: LightSource3D[];
   wallAngleDeg?: number; // -60..60 degrees
   pitchDeg?: number; // -75..75 degrees
   rollDeg?: number; // -180..180 degrees (Z-rotation, default 0)
@@ -88,18 +177,24 @@ export interface RenderWebGLRoomOptions {
   reflectionContrast?: number; // -50..50
   weatherPreset?: 'morning' | 'warm_afternoon' | 'intimate_night' | 'sunny_contrast' | 'overcast_soft' | string;
   shelfContactShadow?: boolean;
+  /** @deprecated Use ambient lighting and color adjustments instead */
   wallHarmonization?: number; // 0..1 (default 0.35)
 
   // Ceiling Lights & Sun Engine
   ceilingLightsEnabled?: boolean;
   ceilingLightTemp?: 'warm' | 'neutral' | 'cool';
   sunIntensity?: number; // 0..200, default 100
+  wallQuad?: PerspectiveQuad;
+  showWallGrid?: boolean;
   isWallAnchored?: boolean;
   wallCalibratedAngle?: number;
   wallCalibratedPitch?: number;
 
   // Complete Canva Image Adjustment
   adjust?: CanvaImageAdjustOptions;
+  adjustBg?: CanvaImageAdjustOptions;
+  bgAdjust?: CanvaImageAdjustOptions;
+  vignette?: number;
 
   // Canva-Style Advanced Shadows
   shadowPreset?: CanvaShadowPreset;
@@ -111,110 +206,6 @@ export interface RenderWebGLRoomOptions {
 
   renderWidth?: number;
   renderHeight?: number;
-}
-
-/**
- * Full Canva 1:1 Image Adjustments Pipeline.
- * Bit-exact zero-loss passthrough when all sliders are 0!
- */
-export function applyCanvaAdjustmentsToCanvas(
-  sourceImage: HTMLImageElement,
-  options: CanvaImageAdjustOptions,
-  targetCanvas?: HTMLCanvasElement
-): HTMLCanvasElement {
-  const {
-    temperature = 0,
-    tint = 0,
-    brightness = 0,
-    contrast = 0,
-    highlights = 0,
-    shadowsTone = 0,
-    whites = 0,
-    blacks = 0,
-    hue = 0,
-    saturation = 0,
-    invert = false,
-  } = options;
-
-  const canvas = targetCanvas || document.createElement('canvas');
-  const w = sourceImage.naturalWidth || sourceImage.width || 1200;
-  const h = sourceImage.naturalHeight || sourceImage.height || 1200;
-  if (canvas.width !== w || canvas.height !== h) {
-    canvas.width = w;
-    canvas.height = h;
-  }
-  const ctx = canvas.getContext('2d')!;
-
-  const isDefault =
-    temperature === 0 &&
-    tint === 0 &&
-    brightness === 0 &&
-    contrast === 0 &&
-    highlights === 0 &&
-    shadowsTone === 0 &&
-    whites === 0 &&
-    blacks === 0 &&
-    hue === 0 &&
-    saturation === 0 &&
-    !invert;
-
-  // 100% Bit-Exact Passthrough when no adjustments are applied
-  if (isDefault) {
-    ctx.filter = 'none';
-    ctx.clearRect(0, 0, w, h);
-    ctx.drawImage(sourceImage, 0, 0, w, h);
-    return canvas;
-  }
-
-  const bVal = 100 + brightness + (whites * 0.4) - (blacks * 0.3);
-  const cVal = 100 + contrast;
-  const sVal = 100 + saturation;
-  const invVal = invert ? 100 : 0;
-
-  ctx.clearRect(0, 0, w, h);
-  ctx.filter = `brightness(${bVal}%) contrast(${cVal}%) saturate(${sVal}%) hue-rotate(${hue}deg) invert(${invVal}%)`;
-  ctx.drawImage(sourceImage, 0, 0, w, h);
-  ctx.filter = 'none';
-
-  // Temperature & Tint spectral overlays
-  if (temperature !== 0 || tint !== 0) {
-    ctx.save();
-    ctx.globalCompositeOperation = 'overlay';
-
-    if (temperature > 0) {
-      ctx.fillStyle = `rgba(255, 170, 50, ${(temperature / 50) * 0.28})`;
-      ctx.fillRect(0, 0, w, h);
-    } else if (temperature < 0) {
-      ctx.fillStyle = `rgba(70, 150, 255, ${(Math.abs(temperature) / 50) * 0.28})`;
-      ctx.fillRect(0, 0, w, h);
-    }
-
-    if (tint > 0) {
-      ctx.fillStyle = `rgba(230, 80, 230, ${(tint / 50) * 0.22})`;
-      ctx.fillRect(0, 0, w, h);
-    } else if (tint < 0) {
-      ctx.fillStyle = `rgba(80, 230, 120, ${(Math.abs(tint) / 50) * 0.22})`;
-      ctx.fillRect(0, 0, w, h);
-    }
-    ctx.restore();
-  }
-
-  // Highlights & Shadows compensation
-  if (highlights !== 0 || shadowsTone !== 0) {
-    ctx.save();
-    if (highlights > 0) {
-      ctx.globalCompositeOperation = 'screen';
-      ctx.fillStyle = `rgba(255, 255, 255, ${(highlights / 50) * 0.2})`;
-      ctx.fillRect(0, 0, w, h);
-    } else if (highlights < 0) {
-      ctx.globalCompositeOperation = 'multiply';
-      ctx.fillStyle = `rgba(200, 200, 200, ${1 - (Math.abs(highlights) / 50) * 0.25})`;
-      ctx.fillRect(0, 0, w, h);
-    }
-    ctx.restore();
-  }
-
-  return canvas;
 }
 
 /**
@@ -1214,6 +1205,7 @@ export function renderWebGLRoomComposite(options: RenderWebGLRoomOptions): HTMLC
     scaleWidth = 0.42,
     placementMode = 'wall',
     lightSource3D,
+    lightsList,
     wallAngleDeg = 0,
     pitchDeg = 0,
     rollDeg = 0,
@@ -1233,15 +1225,21 @@ export function renderWebGLRoomComposite(options: RenderWebGLRoomOptions): HTMLC
     ceilingLightsEnabled,
     ceilingLightTemp = 'neutral',
     sunIntensity = 100,
+    wallQuad,
+    showWallGrid,
     isWallAnchored,
     wallCalibratedAngle,
     wallCalibratedPitch,
     adjust = {},
+    adjustBg,
+    bgAdjust,
+    vignette = 0,
     shadowPreset = 'parallel',
     shadowAngleDeg = 62,
     shadowDistance = 30,
     shadowBlur = 25,
     shadowIntensity = 50,
+    shadowColor = '#000000',
     renderWidth = 1920,
     renderHeight = 1920,
   } = options;
@@ -1270,8 +1268,16 @@ export function renderWebGLRoomComposite(options: RenderWebGLRoomOptions): HTMLC
   const camera = new THREE.PerspectiveCamera(40, renderWidth / renderHeight, 0.1, 50);
   camera.position.set(0, 0, 4.0);
 
-  // 1. Room Background Plane
-  const roomTex = new THREE.CanvasTexture(roomImage);
+  // 1. Room Background Plane (with professional photo color grading support)
+  const effectiveBgAdjust = bgAdjust || adjustBg;
+  let roomSource: CanvasImageSource = roomImage;
+  if (effectiveBgAdjust && !isAdjustDefault(effectiveBgAdjust)) {
+    roomSource = applyColorGrading(roomImage, effectiveBgAdjust);
+  } else if (vignette && vignette > 0) {
+    roomSource = applyColorGrading(roomImage, { vignette });
+  }
+
+  const roomTex = new THREE.CanvasTexture(roomSource as any);
   roomTex.colorSpace = THREE.SRGBColorSpace;
   roomTex.generateMipmaps = true;
   roomTex.minFilter = THREE.LinearMipmapLinearFilter;
@@ -1291,6 +1297,19 @@ export function renderWebGLRoomComposite(options: RenderWebGLRoomOptions): HTMLC
   const bgMesh = new THREE.Mesh(bgGeom, bgMat);
   bgMesh.position.set(0, 0, -0.05);
   scene.add(bgMesh);
+
+  // 1b. Perspective Wall Grid (Converging vanishing lines between wallQuad corners)
+  if (wallQuad) {
+    const gridGeom = createWallQuadGridGeometry(wallQuad, bgW, bgH, 16);
+    const gridMat = new THREE.LineBasicMaterial({
+      color: 0x38bdf8,
+      transparent: true,
+      opacity: 0.35,
+      depthWrite: false,
+    });
+    const wallGridMesh = new THREE.LineSegments(gridGeom, gridMat);
+    scene.add(wallGridMesh);
+  }
 
   // 2. Intelligent Wall Light Harmonization & Weather Presets (Extracts Room Ambience)
   const wallSample = sampleWallLighting(roomImage, centerX, centerY, scaleWidth);
@@ -1325,31 +1344,50 @@ export function renderWebGLRoomComposite(options: RenderWebGLRoomOptions): HTMLC
   const ambientLight = new THREE.AmbientLight(ambColor, finalAmbIntensity);
   scene.add(ambientLight);
 
-  // Light Vector Calculation & Angle Synchronization
-  let keyLightPos: THREE.Vector3;
+  // Multi-Light System & Vector Angle Calculation
+  const activeLights: LightSource3D[] = (lightsList && lightsList.length > 0)
+    ? lightsList
+    : (lightSource3D
+      ? [{
+          id: 'key_1',
+          x: lightSource3D.x,
+          y: lightSource3D.y,
+          z: lightSource3D.z ?? 1.0,
+          intensity: sunIntensity ?? 100,
+        }]
+      : [{
+          id: 'key_1',
+          x: 0.833,
+          y: 0.0,
+          z: 0.625,
+          intensity: sunIntensity ?? 100,
+        }]);
+
   let effectiveReflectionAngle = reflectionAngleDeg;
-  let effectiveShadowAngle = shadowAngleDeg;
+  const combinedLightDir = new THREE.Vector3();
 
-  if (lightSource3D) {
-    const lx = (lightSource3D.x - 0.5) * 12;
-    const ly = -(lightSource3D.y - 0.5) * 12;
-    const lz = (lightSource3D.z ?? 1.0) * 8;
-    keyLightPos = new THREE.Vector3(lx, ly, lz);
+  activeLights.forEach((l, idx) => {
+    const lx = (l.x - 0.5) * 12;
+    const ly = -(l.y - 0.5) * 12;
+    const lz = (l.z ?? 1.0) * 8;
+    const lPos = new THREE.Vector3(lx, ly, lz);
 
-    // Vector from artwork center to light source
-    const dx = lightSource3D.x - centerX;
-    const dy = -(lightSource3D.y - centerY); // Screen Y inverted to standard math +Y
+    const lColor = l.color ? new THREE.Color(l.color) : keyLightColor;
+    const lightNormIntensity = ((l.intensity ?? 100) / 100) * (sunIntensity / 100);
+    const dirLight = new THREE.DirectionalLight(lColor, lightNormIntensity * keyLightIntensity);
+    dirLight.position.copy(lPos);
+    scene.add(dirLight);
+
+    combinedLightDir.add(lPos.clone().normalize().multiplyScalar(lightNormIntensity));
+
+    const dx = l.x - centerX;
+    const dy = -(l.y - centerY); // Screen Y inverted to standard math +Y
     const angleToLightDeg = ((Math.atan2(dy, dx) * 180) / Math.PI + 360) % 360;
 
-    effectiveReflectionAngle = angleToLightDeg;
-    effectiveShadowAngle = (angleToLightDeg + 180) % 360;
-  } else {
-    keyLightPos = new THREE.Vector3(4, 7, 5);
-  }
-
-  const keyLight = new THREE.DirectionalLight(keyLightColor, (sunIntensity / 100) * keyLightIntensity);
-  keyLight.position.copy(keyLightPos);
-  scene.add(keyLight);
+    if (idx === 0 && (lightsList && lightsList.length > 0 || lightSource3D)) {
+      effectiveReflectionAngle = angleToLightDeg;
+    }
+  });
 
   const fillLight = new THREE.DirectionalLight(0xffffff, 0.45 * roomLightScale);
   fillLight.position.set(-4, 3, -3);
@@ -1428,20 +1466,20 @@ export function renderWebGLRoomComposite(options: RenderWebGLRoomOptions): HTMLC
 
   if (hasResina || finishType === 'epoxy_resina' || finishType === 'resina') {
     // Resina Epoxi: high-definition mirror highlight centered at lightSource3D vector
-    roughness = RESIN_OVERLAY.roughness ?? 0.005;
+    roughness = RESIN_OVERLAY.roughness ?? 0.002;
     clearcoat = RESIN_OVERLAY.clearcoat ?? 1.0;
-    clearcoatRoughness = reflectionRoughness ?? (RESIN_OVERLAY.clearcoatRoughness ?? 0.005);
-    envMapIntensity = RESIN_OVERLAY.envMapIntensity ?? 5.0;
-    specularIntensity = RESIN_OVERLAY.specularIntensity ?? 2.6;
-    emissiveBoost = RESIN_OVERLAY.colorBoost ?? 1.06;
+    clearcoatRoughness = reflectionRoughness ?? (RESIN_OVERLAY.clearcoatRoughness ?? 0.002);
+    envMapIntensity = RESIN_OVERLAY.envMapIntensity ?? 6.0;
+    specularIntensity = RESIN_OVERLAY.specularIntensity ?? 3.0;
+    emissiveBoost = RESIN_OVERLAY.colorBoost ?? 1.08;
   } else if (finishType === 'mate') {
-    // Vinilo Mate -> Satinado look: roughness: 0.45, clearcoat: 0.28, clearcoatRoughness: 0.18, envMapIntensity: 0.85, specularIntensity: 0.85
+    // Vinilo Mate -> Satinado look
     const p = finishPresets.mate;
-    roughness = p.roughness ?? 0.45;
-    clearcoat = p.clearcoat ?? 0.28;
-    clearcoatRoughness = reflectionRoughness ?? (p.clearcoatRoughness ?? 0.18);
-    envMapIntensity = p.envMapIntensity ?? 0.85;
-    specularIntensity = p.specularIntensity ?? 0.85;
+    roughness = p.roughness ?? 0.42;
+    clearcoat = p.clearcoat ?? 0.30;
+    clearcoatRoughness = reflectionRoughness ?? (p.clearcoatRoughness ?? 0.15);
+    envMapIntensity = p.envMapIntensity ?? 0.90;
+    specularIntensity = p.specularIntensity ?? 0.90;
     emissiveBoost = 1.0;
   } else if (finishType === 'tornasolado') {
     const p = finishPresets.tornasolado;
@@ -1453,7 +1491,7 @@ export function renderWebGLRoomComposite(options: RenderWebGLRoomOptions): HTMLC
     iridescence = p.iridescence ?? 1.0;
     iridescenceIOR = p.iridescenceIOR ?? 1.45;
   } else {
-    // Vinilo Brillante nítido: roughness: 0.10, clearcoat: 0.88, clearcoatRoughness: 0.03, envMapIntensity: 2.2, specularIntensity: 1.9
+    // Vinilo Brillante nítido
     const p = finishPresets[finishType] || finishPresets.brillante;
     roughness = p.roughness ?? 0.10;
     clearcoat = p.clearcoat ?? 0.88;
@@ -1498,7 +1536,10 @@ export function renderWebGLRoomComposite(options: RenderWebGLRoomOptions): HTMLC
   );
   const frameQuat = new THREE.Quaternion().setFromEuler(frameEuler);
   const invFrameQuat = frameQuat.clone().invert();
-  const lightLocal = keyLightPos.clone().normalize().applyQuaternion(invFrameQuat);
+  const dominantLightDir = combinedLightDir.lengthSq() > 0
+    ? combinedLightDir.clone().normalize()
+    : new THREE.Vector3(4, 7, 5).normalize();
+  const lightLocal = dominantLightDir.applyQuaternion(invFrameQuat);
 
   // BoxGeometry face normals: 0: +X (Right), 1: -X (Left), 2: +Y (Top), 3: -Y (Bottom)
   const edgeNormals = [
@@ -1582,22 +1623,63 @@ export function renderWebGLRoomComposite(options: RenderWebGLRoomOptions): HTMLC
 
   scene.add(group);
 
-  // 6. Physically Anchored Frame Drop Shadow Mesh
-  const shadowCanvas = generateExactFrameShadowTexture({
-    shadowPreset,
-    aspectRatio: totalW / totalH,
-    angleDeg: effectiveShadowAngle,
-    distance: shadowDistance,
-    blur: shadowBlur,
-    intensity: shadowIntensity,
-    wallAngleDeg,
-    pitchDeg: clampedPitchDeg,
-    rollDeg,
-    zDistance: clampedZDistCm,
-    shelfContactShadow: effectiveShelfContactShadow,
+  // 6. Physically Anchored Multi-Light Frame Drop Shadow Mesh
+  const masterShadowCanvas = document.createElement('canvas');
+  masterShadowCanvas.width = 1024;
+  masterShadowCanvas.height = 1024;
+  const masterShadowCtx = masterShadowCanvas.getContext('2d')!;
+  masterShadowCtx.clearRect(0, 0, 1024, 1024);
+
+  const shadowAspect = totalW / totalH;
+  const tempShadowCanvas = document.createElement('canvas');
+  tempShadowCanvas.width = 1024;
+  tempShadowCanvas.height = 1024;
+  const tempShadowCtx = tempShadowCanvas.getContext('2d')!;
+
+  activeLights.forEach((l) => {
+    const dx = l.x - centerX;
+    const dy = -(l.y - centerY);
+    const angleToLightDeg = ((Math.atan2(dy, dx) * 180) / Math.PI + 360) % 360;
+    const lightShadowAngle = (angleToLightDeg + 180) % 360;
+    const lightWeight = (l.intensity ?? 100) / 100;
+    const singleIntensity = Math.min(100, shadowIntensity * lightWeight);
+
+    tempShadowCtx.clearRect(0, 0, 1024, 1024);
+    drawExactFrameShadowToContext(tempShadowCtx, {
+      shadowPreset,
+      aspectRatio: shadowAspect,
+      angleDeg: lightShadowAngle,
+      distance: shadowDistance,
+      blur: shadowBlur,
+      intensity: singleIntensity,
+      wallAngleDeg,
+      pitchDeg: clampedPitchDeg,
+      rollDeg,
+      zDistance: clampedZDistCm,
+      shelfContactShadow: false,
+      shadowColor,
+      width: 1024,
+      height: 1024,
+    });
+
+    masterShadowCtx.drawImage(tempShadowCanvas, 0, 0);
   });
 
-  const sTex = new THREE.CanvasTexture(shadowCanvas);
+  if (effectiveShelfContactShadow) {
+    tempShadowCtx.clearRect(0, 0, 1024, 1024);
+    drawExactFrameShadowToContext(tempShadowCtx, {
+      shadowPreset: 'none',
+      aspectRatio: shadowAspect,
+      intensity: shadowIntensity,
+      shelfContactShadow: true,
+      shadowColor,
+      width: 1024,
+      height: 1024,
+    });
+    masterShadowCtx.drawImage(tempShadowCanvas, 0, 0);
+  }
+
+  const sTex = new THREE.CanvasTexture(masterShadowCanvas);
   const shadowGeom = new THREE.PlaneGeometry(totalW * 2.2, totalH * 2.2);
   const shadowMat = new THREE.MeshBasicMaterial({
     map: sTex,

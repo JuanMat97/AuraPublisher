@@ -175,3 +175,6 @@ export function getSampleArtwork(type: 'abstract' | 'portrait' | 'landscape'): S
     };
   }
 }
+
+export { applyColorGrading, applyCanvaAdjustmentsToCanvas } from '../engine/colorGrading';
+

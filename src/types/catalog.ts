@@ -1,3 +1,6 @@
+import type { PerspectiveQuad, LightSource3D } from './environment';
+export type { PerspectiveQuad, LightSource3D };
+
 export type PanelConfig = 'single' | 'diptych' | 'triptych' | 'polyptych';
 export type Orientation = 'vertical' | 'horizontal' | 'square';
 export type FrameType = 'wrap_1cm';
@@ -126,17 +129,18 @@ export const CANVA_SHADOW_OPTIONS: CanvaShadowOption[] = [
 ];
 
 export interface CanvaImageAdjustOptions {
-  temperature?: number; // -50..50
-  tint?: number; // -50..50
-  brightness?: number; // -50..50
-  contrast?: number; // -50..50
-  highlights?: number; // -50..50
-  shadowsTone?: number; // -50..50
-  whites?: number; // -50..50
-  blacks?: number; // -50..50
-  hue?: number; // -180..180
+  brightness?: number; // -100..100
+  contrast?: number; // -100..100
+  highlights?: number; // -100..100
+  shadowsTone?: number; // -100..100
+  whites?: number; // -100..100
+  blacks?: number; // -100..100
+  temperature?: number; // -100..100
+  tint?: number; // -100..100
   saturation?: number; // -100..100
+  hue?: number; // -180..180
   invert?: boolean;
+  vignette?: number; // 0..100
 }
 
 export interface CanvaMoldConfig {
@@ -145,7 +149,8 @@ export interface CanvaMoldConfig {
   scaleWidth?: number;
   fitMode?: 'contain' | 'cover';
   placementMode?: 'wall' | 'shelf';
-  lightSource3D?: { x: number; y: number; z: number };
+  lightSource3D?: LightSource3D | { x: number; y: number; z: number };
+  lightsList?: LightSource3D[];
   vinylFinish?: VinylFinish;
   hasResina?: boolean;
   lightMode?: AmbientLightMode;
@@ -158,6 +163,7 @@ export interface CanvaMoldConfig {
   reflectionBrightness?: number;
   reflectionContrast?: number;
   weatherPreset?: string;
+  /** @deprecated Use ambient lighting and color adjustments instead */
   wallHarmonization?: number;
   wallAngle?: number;
   pitchDeg?: number;
@@ -169,6 +175,7 @@ export interface CanvaMoldConfig {
   panelCount?: number;
 
   // Independent 3D Wall Grid & Calibration
+  wallQuad?: PerspectiveQuad;
   isWallAnchored?: boolean;
   wallCalibratedAngle?: number;
   wallCalibratedPitch?: number;
@@ -180,6 +187,9 @@ export interface CanvaMoldConfig {
 
   // Complete Canva Image Adjustment
   adjust?: CanvaImageAdjustOptions;
+  adjustBg?: CanvaImageAdjustOptions;
+  bgAdjust?: CanvaImageAdjustOptions;
+  vignette?: number;
 
   // Canva-Style Shadows
   shadowPreset?: CanvaShadowPreset;

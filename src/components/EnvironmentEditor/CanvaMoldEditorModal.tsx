@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three-stdlib';
-import { EnvironmentScene, WeatherPreset } from '../../types/environment';
+import { EnvironmentScene, WeatherPreset, PerspectiveQuad, LightSource3D } from '../../types/environment';
 import { loadImageElement, getSampleArtwork } from '../../utils/imageLoader';
 import { useAppStore } from '../../store/appStore';
 import {
@@ -11,6 +11,7 @@ import {
   CanvaShadowPreset,
   CANVA_SHADOW_OPTIONS,
   CATALOG_SIZES,
+  CanvaImageAdjustOptions,
 } from '../../types/catalog';
 import {
   applyCanvaAdjustmentsToCanvas,
@@ -33,10 +34,16 @@ import {
   Palette,
   RotateCcw,
   Target,
-  Sparkles,
   CloudSun,
   Box,
   Grid,
+  Undo2,
+  Redo2,
+  Plus,
+  Trash2,
+  Magnet,
+  Image as ImageIcon,
+  Home,
 } from 'lucide-react';
 
 interface CanvaMoldEditorModalProps {
@@ -45,8 +52,10 @@ interface CanvaMoldEditorModalProps {
 }
 
 type EditorTab = 'perspective' | 'color' | 'lighting' | 'shadow';
+type AdjustDestination = 'artwork' | 'background';
 type DragTarget =
   | 'center'
+  | 'canvasOrbit'
   | 'topLeft'
   | 'topRight'
   | 'bottomRight'
@@ -55,8 +64,77 @@ type DragTarget =
   | 'bottomCenter'
   | 'leftCenter'
   | 'rightCenter'
-  | 'lightSphere'
+  | 'wallPin_tl'
+  | 'wallPin_tr'
+  | 'wallPin_br'
+  | 'wallPin_bl'
+  | string // light_${id}
   | null;
+
+interface EditorSnapshot {
+  centerX: number;
+  centerY: number;
+  scaleWidth: number;
+  wallAngle: number;
+  pitchAngle: number;
+  rollAngle: number;
+  thicknessCm: number;
+  zDistance: number;
+  placementMode: 'wall' | 'shelf';
+  isWallAnchored: boolean;
+  wallCalibratedAngle: number;
+  wallCalibratedPitch: number;
+  wallQuad: PerspectiveQuad;
+  lightsList: LightSource3D[];
+  activeLightId: string;
+  isSnappingEnabled: boolean;
+  // Artwork adjustments
+  temperature: number;
+  tint: number;
+  brightness: number;
+  contrast: number;
+  highlights: number;
+  shadowsTone: number;
+  whites: number;
+  blacks: number;
+  hue: number;
+  saturation: number;
+  vignette: number;
+  invert: boolean;
+  // Background adjustments
+  temperatureBg: number;
+  tintBg: number;
+  brightnessBg: number;
+  contrastBg: number;
+  highlightsBg: number;
+  shadowsToneBg: number;
+  whitesBg: number;
+  blacksBg: number;
+  hueBg: number;
+  saturationBg: number;
+  vignetteBg: number;
+  invertBg: boolean;
+  // Lighting & shadows
+  finishMode: 'resina' | 'brillante' | 'mate';
+  reflectionType: ReflectionType;
+  reflectionAngleDeg: number;
+  reflectionIntensity: number;
+  reflectionScale: number;
+  reflectionRoughness: number;
+  reflectionBrightness: number;
+  reflectionContrast: number;
+  weatherPreset: WeatherPreset;
+  wallHarmonization: number;
+  ceilingLightsEnabled: boolean;
+  ceilingLightTemp: 'warm' | 'neutral' | 'cool';
+  sunIntensity: number;
+  shadowPreset: CanvaShadowPreset;
+  shadowBlur: number;
+  shadowIntensity: number;
+  shadowDistance: number;
+  shadowAngleDeg: number;
+  shadowContactOcclusion: number;
+}
 
 export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ environment, onClose }) => {
   const { selectedImage, artworkSlots, productConfig, setProductConfig, updateEnvironment } = useAppStore();
@@ -64,6 +142,7 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
   const containerRef = useRef<HTMLDivElement>(null);
 
   const [activeTab, setActiveTab] = useState<EditorTab>('perspective');
+  const [adjustDestination, setAdjustDestination] = useState<AdjustDestination>('artwork');
 
   const pos = environment.positions[0];
   const initialCenterX = pos?.centerX ?? (pos?.quad ? (pos.quad.topLeft.x + pos.quad.topRight.x) / 2 : 0.5);
@@ -95,13 +174,29 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
     pos?.wallCalibratedPitch ?? pos?.pitchDeg ?? 0
   );
 
+  // Wall Perspective Quad (4 Corner Wall Pins)
+  const [wallQuad, setWallQuad] = useState<PerspectiveQuad>(
+    pos?.wallQuad ?? {
+      topLeft: { x: 0.1, y: 0.1 },
+      topRight: { x: 0.9, y: 0.1 },
+      bottomRight: { x: 0.9, y: 0.9 },
+      bottomLeft: { x: 0.1, y: 0.9 },
+    }
+  );
+
   // 3D Wall Perspective Grid Visibility
   const [showWallGrid, setShowWallGrid] = useState<boolean>(true);
 
-  // Interactive 3D Light Sphere Gizmo position (screen-normalized coordinates { x, y, z })
-  const [lightPos3D, setLightPos3D] = useState<{ x: number; y: number; z: number }>(
-    pos?.lightPos3D ?? pos?.lightSource3D ?? { x: 0.75, y: 0.25, z: 1.0 }
-  );
+  // Multi-Light 3D Spheres Gizmo
+  const [lightsList, setLightsList] = useState<LightSource3D[]>(() => {
+    if (pos?.lightsList && pos.lightsList.length > 0) return pos.lightsList;
+    const initX = pos?.lightPos3D?.x ?? pos?.lightSource3D?.x ?? 0.75;
+    const initY = pos?.lightPos3D?.y ?? pos?.lightSource3D?.y ?? 0.25;
+    const initZ = pos?.lightPos3D?.z ?? pos?.lightSource3D?.z ?? 1.0;
+    const initInt = pos?.sunIntensity ?? 100;
+    return [{ id: 'light_1', name: 'Sol 1', x: initX, y: initY, z: initZ, intensity: initInt }];
+  });
+  const [activeLightId, setActiveLightId] = useState<string>(lightsList[0]?.id || 'light_1');
 
   // Sun Light & Industrial Ceiling Lighting Parameters (Rehydrated)
   const [sunIntensity, setSunIntensity] = useState<number>(pos?.sunIntensity ?? 100);
@@ -110,7 +205,8 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
     pos?.ceilingLightTemp ?? 'neutral'
   );
 
-  // Snapping Guidelines & Hover / Ctrl Interaction State
+  // Snapping Guidelines & Magnetic Switch
+  const [isSnappingEnabled, setIsSnappingEnabled] = useState<boolean>(pos?.isSnappingEnabled ?? true);
   const [isSnappedX, setIsSnappedX] = useState(false);
   const [isSnappedY, setIsSnappedY] = useState(false);
   const [isCtrlActive, setIsCtrlActive] = useState(false);
@@ -148,7 +244,7 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
     productConfig.hasResina ? 'resina' : productConfig.vinylFinish === 'mate' ? 'mate' : 'brillante'
   );
 
-  // 3. Full Canva Image Adjustment Suite (Rehydrated from position or neutral 0)
+  // 3A. Artwork Image Adjustment Suite
   const [temperature, setTemperature] = useState(pos?.temperature ?? pos?.adjust?.temperature ?? 0);
   const [tint, setTint] = useState(pos?.tint ?? pos?.adjust?.tint ?? 0);
   const [brightness, setBrightness] = useState(pos?.brightness ?? pos?.adjust?.brightness ?? 0);
@@ -159,7 +255,23 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
   const [blacks, setBlacks] = useState(pos?.blacks ?? pos?.adjust?.blacks ?? 0);
   const [hue, setHue] = useState(pos?.hue ?? pos?.adjust?.hue ?? 0);
   const [saturation, setSaturation] = useState(pos?.saturation ?? pos?.adjust?.saturation ?? 0);
+  const [vignette, setVignette] = useState(pos?.vignette ?? pos?.adjust?.vignette ?? 0);
   const [invert, setInvert] = useState(pos?.invert ?? pos?.adjust?.invert ?? false);
+
+  // 3B. Background Mockup Image Adjustment Suite
+  const bgOpts = pos?.adjustBg ?? pos?.bgAdjust;
+  const [temperatureBg, setTemperatureBg] = useState(bgOpts?.temperature ?? 0);
+  const [tintBg, setTintBg] = useState(bgOpts?.tint ?? 0);
+  const [brightnessBg, setBrightnessBg] = useState(bgOpts?.brightness ?? 0);
+  const [contrastBg, setContrastBg] = useState(bgOpts?.contrast ?? 0);
+  const [highlightsBg, setHighlightsBg] = useState(bgOpts?.highlights ?? 0);
+  const [shadowsToneBg, setShadowsToneBg] = useState(bgOpts?.shadowsTone ?? 0);
+  const [whitesBg, setWhitesBg] = useState(bgOpts?.whites ?? 0);
+  const [blacksBg, setBlacksBg] = useState(bgOpts?.blacks ?? 0);
+  const [hueBg, setHueBg] = useState(bgOpts?.hue ?? 0);
+  const [saturationBg, setSaturationBg] = useState(bgOpts?.saturation ?? 0);
+  const [vignetteBg, setVignetteBg] = useState(bgOpts?.vignette ?? 0);
+  const [invertBg, setInvertBg] = useState(bgOpts?.invert ?? false);
 
   // 4. Auto-Synchronized Shadows (Rehydrated)
   const [shadowPreset, setShadowPreset] = useState<CanvaShadowPreset>(
@@ -177,6 +289,227 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
     pos?.shadowContactOcclusion ?? (pos?.placementMode === 'shelf' ? 80 : 40)
   );
 
+  // Undo / Redo History Stack
+  const undoStackRef = useRef<EditorSnapshot[]>([]);
+  const redoStackRef = useRef<EditorSnapshot[]>([]);
+  const [canUndo, setCanUndo] = useState(false);
+  const [canRedo, setCanRedo] = useState(false);
+
+  const takeSnapshot = useCallback((): EditorSnapshot => {
+    return {
+      centerX,
+      centerY,
+      scaleWidth,
+      wallAngle,
+      pitchAngle,
+      rollAngle,
+      thicknessCm,
+      zDistance,
+      placementMode,
+      isWallAnchored,
+      wallCalibratedAngle,
+      wallCalibratedPitch,
+      wallQuad: JSON.parse(JSON.stringify(wallQuad)),
+      lightsList: JSON.parse(JSON.stringify(lightsList)),
+      activeLightId,
+      isSnappingEnabled,
+      temperature,
+      tint,
+      brightness,
+      contrast,
+      highlights,
+      shadowsTone,
+      whites,
+      blacks,
+      hue,
+      saturation,
+      vignette,
+      invert,
+      temperatureBg,
+      tintBg,
+      brightnessBg,
+      contrastBg,
+      highlightsBg,
+      shadowsToneBg,
+      whitesBg,
+      blacksBg,
+      hueBg,
+      saturationBg,
+      vignetteBg,
+      invertBg,
+      finishMode,
+      reflectionType,
+      reflectionAngleDeg,
+      reflectionIntensity,
+      reflectionScale,
+      reflectionRoughness,
+      reflectionBrightness,
+      reflectionContrast,
+      weatherPreset,
+      wallHarmonization,
+      ceilingLightsEnabled,
+      ceilingLightTemp,
+      sunIntensity,
+      shadowPreset,
+      shadowBlur,
+      shadowIntensity,
+      shadowDistance,
+      shadowAngleDeg,
+      shadowContactOcclusion,
+    };
+  }, [
+    centerX,
+    centerY,
+    scaleWidth,
+    wallAngle,
+    pitchAngle,
+    rollAngle,
+    thicknessCm,
+    zDistance,
+    placementMode,
+    isWallAnchored,
+    wallCalibratedAngle,
+    wallCalibratedPitch,
+    wallQuad,
+    lightsList,
+    activeLightId,
+    isSnappingEnabled,
+    temperature,
+    tint,
+    brightness,
+    contrast,
+    highlights,
+    shadowsTone,
+    whites,
+    blacks,
+    hue,
+    saturation,
+    vignette,
+    invert,
+    temperatureBg,
+    tintBg,
+    brightnessBg,
+    contrastBg,
+    highlightsBg,
+    shadowsToneBg,
+    whitesBg,
+    blacksBg,
+    hueBg,
+    saturationBg,
+    vignetteBg,
+    invertBg,
+    finishMode,
+    reflectionType,
+    reflectionAngleDeg,
+    reflectionIntensity,
+    reflectionScale,
+    reflectionRoughness,
+    reflectionBrightness,
+    reflectionContrast,
+    weatherPreset,
+    wallHarmonization,
+    ceilingLightsEnabled,
+    ceilingLightTemp,
+    sunIntensity,
+    shadowPreset,
+    shadowBlur,
+    shadowIntensity,
+    shadowDistance,
+    shadowAngleDeg,
+    shadowContactOcclusion,
+  ]);
+
+  const pushSnapshot = useCallback(() => {
+    const snap = takeSnapshot();
+    undoStackRef.current.push(snap);
+    if (undoStackRef.current.length > 50) undoStackRef.current.shift();
+    redoStackRef.current = [];
+    setCanUndo(true);
+    setCanRedo(false);
+  }, [takeSnapshot]);
+
+  const applySnapshot = useCallback((snap: EditorSnapshot) => {
+    setCenterX(snap.centerX);
+    setCenterY(snap.centerY);
+    setScaleWidth(snap.scaleWidth);
+    setWallAngle(snap.wallAngle);
+    setPitchAngle(snap.pitchAngle);
+    setRollAngle(snap.rollAngle);
+    setThicknessCm(snap.thicknessCm);
+    setZDistance(snap.zDistance);
+    setPlacementMode(snap.placementMode);
+    setIsWallAnchored(snap.isWallAnchored);
+    setWallCalibratedAngle(snap.wallCalibratedAngle);
+    setWallCalibratedPitch(snap.wallCalibratedPitch);
+    setWallQuad(snap.wallQuad);
+    setLightsList(snap.lightsList);
+    setActiveLightId(snap.activeLightId);
+    setIsSnappingEnabled(snap.isSnappingEnabled);
+    setTemperature(snap.temperature);
+    setTint(snap.tint);
+    setBrightness(snap.brightness);
+    setContrast(snap.contrast);
+    setHighlights(snap.highlights);
+    setShadowsTone(snap.shadowsTone);
+    setWhites(snap.whites);
+    setBlacks(snap.blacks);
+    setHue(snap.hue);
+    setSaturation(snap.saturation);
+    setVignette(snap.vignette);
+    setInvert(snap.invert);
+    setTemperatureBg(snap.temperatureBg);
+    setTintBg(snap.tintBg);
+    setBrightnessBg(snap.brightnessBg);
+    setContrastBg(snap.contrastBg);
+    setHighlightsBg(snap.highlightsBg);
+    setShadowsToneBg(snap.shadowsToneBg);
+    setWhitesBg(snap.whitesBg);
+    setBlacksBg(snap.blacksBg);
+    setHueBg(snap.hueBg);
+    setSaturationBg(snap.saturationBg);
+    setVignetteBg(snap.vignetteBg);
+    setInvertBg(snap.invertBg);
+    setFinishMode(snap.finishMode);
+    setReflectionType(snap.reflectionType);
+    setReflectionAngleDeg(snap.reflectionAngleDeg);
+    setReflectionIntensity(snap.reflectionIntensity);
+    setReflectionScale(snap.reflectionScale);
+    setReflectionRoughness(snap.reflectionRoughness);
+    setReflectionBrightness(snap.reflectionBrightness);
+    setReflectionContrast(snap.reflectionContrast);
+    setWeatherPreset(snap.weatherPreset);
+    setWallHarmonization(snap.wallHarmonization);
+    setCeilingLightsEnabled(snap.ceilingLightsEnabled);
+    setCeilingLightTemp(snap.ceilingLightTemp);
+    setSunIntensity(snap.sunIntensity);
+    setShadowPreset(snap.shadowPreset);
+    setShadowBlur(snap.shadowBlur);
+    setShadowIntensity(snap.shadowIntensity);
+    setShadowDistance(snap.shadowDistance);
+    setShadowAngleDeg(snap.shadowAngleDeg);
+    setShadowContactOcclusion(snap.shadowContactOcclusion);
+  }, []);
+
+  const handleUndo = useCallback(() => {
+    if (undoStackRef.current.length === 0) return;
+    const currentSnap = takeSnapshot();
+    const prevSnap = undoStackRef.current.pop()!;
+    redoStackRef.current.push(currentSnap);
+    applySnapshot(prevSnap);
+    setCanUndo(undoStackRef.current.length > 0);
+    setCanRedo(true);
+  }, [takeSnapshot, applySnapshot]);
+
+  const handleRedo = useCallback(() => {
+    if (redoStackRef.current.length === 0) return;
+    const currentSnap = takeSnapshot();
+    const nextSnap = redoStackRef.current.pop()!;
+    undoStackRef.current.push(currentSnap);
+    applySnapshot(nextSnap);
+    setCanUndo(true);
+    setCanRedo(redoStackRef.current.length > 0);
+  }, [takeSnapshot, applySnapshot]);
+
   const [dragTarget, setDragTarget] = useState<DragTarget>(null);
   const dragStart = useRef({
     x: 0,
@@ -187,6 +520,7 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
     origAngle: 0,
     origPitch: 0,
     origRoll: 0,
+    origQuad: { ...wallQuad },
   });
 
   // On-Screen Vector Pin Coordinates (9 Pins: 4 Corners + 4 Midpoints + Center)
@@ -224,6 +558,9 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
     proxyCanvases: HTMLCanvasElement[];
     gradedCanvases: HTMLCanvasElement[];
     gradedTextures: THREE.CanvasTexture[];
+    roomProxyCanvas: HTMLCanvasElement | null;
+    gradedRoomCanvas: HTMLCanvasElement | null;
+    roomTex: THREE.CanvasTexture | null;
     ambLight: THREE.AmbientLight | null;
     keyLight: THREE.DirectionalLight | null;
     fillLight: THREE.DirectionalLight | null;
@@ -252,6 +589,9 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
     proxyCanvases: [],
     gradedCanvases: [],
     gradedTextures: [],
+    roomProxyCanvas: null,
+    gradedRoomCanvas: null,
+    roomTex: null,
     ambLight: null,
     keyLight: null,
     fillLight: null,
@@ -264,11 +604,22 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
     animId: 0,
   });
 
-  // Track Ctrl / Cmd key state globally
+  // Track Ctrl / Cmd key state globally & handle Ctrl+Z / Ctrl+Y
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Control' || e.key === 'Meta') {
         setIsCtrlActive(true);
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        if (e.shiftKey) {
+          handleRedo();
+        } else {
+          handleUndo();
+        }
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
+        e.preventDefault();
+        handleRedo();
       }
     };
     const handleKeyUp = (e: KeyboardEvent) => {
@@ -282,7 +633,26 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, []);
+  }, [handleUndo, handleRedo]);
+
+  // Ctrl + Wheel (Scroll) smooth scale adjustment
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const handleWheel = (e: WheelEvent) => {
+      if (e.ctrlKey || e.metaKey || isCtrlActive) {
+        e.preventDefault();
+        const delta = -e.deltaY * 0.0006;
+        setScaleWidth((prev) => Math.max(0.05, Math.min(0.90, prev + delta)));
+      }
+    };
+
+    container.addEventListener('wheel', handleWheel, { passive: false });
+    return () => {
+      container.removeEventListener('wheel', handleWheel);
+    };
+  }, [isCtrlActive]);
 
   // Update Environment Lighting Rig & PBR Materials
   const updateEnvironmentLighting = useCallback(
@@ -448,7 +818,7 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
     [wallSample]
   );
 
-  // Throttled 60fps Color Grading Pipeline using 1024px Proxy Canvas
+  // Throttled 60fps Color Grading Pipeline for Artwork (using 1024px Proxy Canvas)
   const rafColorRef = useRef<number | null>(null);
   const updateArtworkColorThrottled = useCallback(() => {
     if (rafColorRef.current) cancelAnimationFrame(rafColorRef.current);
@@ -473,6 +843,7 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
               blacks,
               hue,
               saturation,
+              vignette,
               invert,
             },
             gCanvas
@@ -481,7 +852,37 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
         }
       });
     });
-  }, [temperature, tint, brightness, contrast, highlights, shadowsTone, whites, blacks, hue, saturation, invert]);
+  }, [temperature, tint, brightness, contrast, highlights, shadowsTone, whites, blacks, hue, saturation, vignette, invert]);
+
+  // Throttled 60fps Color Grading Pipeline for Mockup Background Plane
+  const rafBgColorRef = useRef<number | null>(null);
+  const updateBgColorThrottled = useCallback(() => {
+    if (rafBgColorRef.current) cancelAnimationFrame(rafBgColorRef.current);
+    rafBgColorRef.current = requestAnimationFrame(() => {
+      const { roomProxyCanvas, gradedRoomCanvas, roomTex } = threeState.current;
+      if (!roomProxyCanvas || !gradedRoomCanvas || !roomTex) return;
+
+      applyCanvaAdjustmentsToCanvas(
+        roomProxyCanvas as any,
+        {
+          temperature: temperatureBg,
+          tint: tintBg,
+          brightness: brightnessBg,
+          contrast: contrastBg,
+          highlights: highlightsBg,
+          shadowsTone: shadowsToneBg,
+          whites: whitesBg,
+          blacks: blacksBg,
+          hue: hueBg,
+          saturation: saturationBg,
+          vignette: vignetteBg,
+          invert: invertBg,
+        },
+        gradedRoomCanvas
+      );
+      roomTex.needsUpdate = true;
+    });
+  }, [temperatureBg, tintBg, brightnessBg, contrastBg, highlightsBg, shadowsToneBg, whitesBg, blacksBg, hueBg, saturationBg, vignetteBg, invertBg]);
 
   // Update Box Geometry Depth when thickness changes
   const updateGeometryDepth = useCallback((thickCm: number) => {
@@ -543,8 +944,36 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
         const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 50);
         camera.position.set(0, 0, 4.0);
 
-        // Room Background Plane
-        const roomTex = new THREE.CanvasTexture(envImg);
+        // Room Background Plane with Proxy Canvas for Dual-Grading
+        const roomProxyCanvas = document.createElement('canvas');
+        const natEnvW = envImg.naturalWidth || envImg.width || 1920;
+        const natEnvH = envImg.naturalHeight || envImg.height || 1080;
+        roomProxyCanvas.width = natEnvW;
+        roomProxyCanvas.height = natEnvH;
+        const rCtx = roomProxyCanvas.getContext('2d')!;
+        rCtx.drawImage(envImg, 0, 0, natEnvW, natEnvH);
+
+        const gradedRoomCanvas = document.createElement('canvas');
+        applyCanvaAdjustmentsToCanvas(
+          roomProxyCanvas as any,
+          {
+            temperature: temperatureBg,
+            tint: tintBg,
+            brightness: brightnessBg,
+            contrast: contrastBg,
+            highlights: highlightsBg,
+            shadowsTone: shadowsToneBg,
+            whites: whitesBg,
+            blacks: blacksBg,
+            hue: hueBg,
+            saturation: saturationBg,
+            vignette: vignetteBg,
+            invert: invertBg,
+          },
+          gradedRoomCanvas
+        );
+
+        const roomTex = new THREE.CanvasTexture(gradedRoomCanvas);
         roomTex.colorSpace = THREE.SRGBColorSpace;
         roomTex.generateMipmaps = true;
         roomTex.minFilter = THREE.LinearMipmapLinearFilter;
@@ -568,10 +997,11 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
         const ambLight = new THREE.AmbientLight(0xffffff, 0.4);
         scene.add(ambLight);
 
+        const activeLight = lightsList.find((l) => l.id === activeLightId) || lightsList[0] || { x: 0.75, y: 0.25, z: 1.0, intensity: 100 };
         const keyLight = new THREE.DirectionalLight(0xffffff, 1.4);
-        const initLightX = (lightPos3D.x - 0.5) * bgW * 1.5;
-        const initLightY = -(lightPos3D.y - 0.5) * bgH * 1.5;
-        const initLightZ = Math.max(1.5, lightPos3D.z * 5.0);
+        const initLightX = (activeLight.x - 0.5) * bgW * 1.5;
+        const initLightY = -(activeLight.y - 0.5) * bgH * 1.5;
+        const initLightZ = Math.max(1.5, (activeLight.z ?? 1.0) * 5.0);
         keyLight.position.set(initLightX, initLightY, initLightZ);
         scene.add(keyLight);
 
@@ -643,6 +1073,7 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
               blacks,
               hue,
               saturation,
+              vignette,
               invert,
             },
             gCanvas
@@ -787,6 +1218,9 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
           proxyCanvases,
           gradedCanvases,
           gradedTextures,
+          roomProxyCanvas,
+          gradedRoomCanvas,
+          roomTex,
           ambLight,
           keyLight,
           fillLight,
@@ -830,6 +1264,7 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
       alive = false;
       if (threeState.current.animId) cancelAnimationFrame(threeState.current.animId);
       if (rafColorRef.current) cancelAnimationFrame(rafColorRef.current);
+      if (rafBgColorRef.current) cancelAnimationFrame(rafBgColorRef.current);
       if (threeState.current.currentEnvRenderTarget) threeState.current.currentEnvRenderTarget.dispose();
       if (threeState.current.pmremGenerator) threeState.current.pmremGenerator.dispose();
       if (threeState.current.renderer) threeState.current.renderer.dispose();
@@ -941,17 +1376,18 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
     wallCalibratedPitch,
   ]);
 
-  // Live Sync 3D KeyLight Position & Sun Intensity with Canvas Light Sphere Gizmo
+  // Live Sync 3D KeyLight Position & Active Light Intensity
   useEffect(() => {
     const { keyLight, bgW, bgH } = threeState.current;
-    if (keyLight) {
-      const lightWorldX = (lightPos3D.x - 0.5) * bgW * 1.5;
-      const lightWorldY = -(lightPos3D.y - 0.5) * bgH * 1.5;
-      const lightWorldZ = Math.max(1.5, lightPos3D.z * 5.0);
+    const activeLight = lightsList.find((l) => l.id === activeLightId) || lightsList[0];
+    if (keyLight && activeLight) {
+      const lightWorldX = (activeLight.x - 0.5) * bgW * 1.5;
+      const lightWorldY = -(activeLight.y - 0.5) * bgH * 1.5;
+      const lightWorldZ = Math.max(1.5, (activeLight.z ?? 1.0) * 5.0);
       keyLight.position.set(lightWorldX, lightWorldY, lightWorldZ);
-      keyLight.intensity = (sunIntensity / 100) * 1.4;
+      keyLight.intensity = ((activeLight.intensity ?? sunIntensity) / 100) * 1.4;
     }
-  }, [lightPos3D, sunIntensity]);
+  }, [lightsList, activeLightId, sunIntensity]);
 
   // Dynamic Geometry Thickness update
   useEffect(() => {
@@ -994,6 +1430,10 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
     updateArtworkColorThrottled();
   }, [updateArtworkColorThrottled]);
 
+  useEffect(() => {
+    updateBgColorThrottled();
+  }, [updateBgColorThrottled]);
+
   // Live Auto-Synchronized Shadow Texture Redraw
   useEffect(() => {
     const { shadowCanvas, shadowTexture, artAspect } = threeState.current;
@@ -1030,20 +1470,44 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
     shadowContactOcclusion,
   ]);
 
-  // Mouse Handlers with 9 Vector Pins + Light Sphere Gizmo + Proportional Scaling + Celestial Midpoint Controls + Ctrl Modes
+  // Mouse Handlers with 9 Vector Pins + Wall Quad + Multi-Light Gizmo + Shortcuts
   const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!containerRef.current) return;
     const rect = containerRef.current.getBoundingClientRect();
     const clickX = (e.clientX - rect.left) / rect.width;
     const clickY = (e.clientY - rect.top) / rect.height;
 
+    pushSnapshot();
+
     let hitTarget: DragTarget = null;
 
-    // Check light sphere first (hit radius ~7%)
-    const lightDist = Math.hypot(clickX * 100 - lightPos3D.x * 100, clickY * 100 - lightPos3D.y * 100);
-    if (lightDist < 7) {
-      hitTarget = 'lightSphere';
-    } else if (screenPins) {
+    // Check Wall Quad Corner Pins if calibrating wall
+    if (isCalibratingWall) {
+      const distTL = Math.hypot(clickX - wallQuad.topLeft.x, clickY - wallQuad.topLeft.y);
+      const distTR = Math.hypot(clickX - wallQuad.topRight.x, clickY - wallQuad.topRight.y);
+      const distBR = Math.hypot(clickX - wallQuad.bottomRight.x, clickY - wallQuad.bottomRight.y);
+      const distBL = Math.hypot(clickX - wallQuad.bottomLeft.x, clickY - wallQuad.bottomLeft.y);
+
+      if (distTL < 0.08) hitTarget = 'wallPin_tl';
+      else if (distTR < 0.08) hitTarget = 'wallPin_tr';
+      else if (distBR < 0.08) hitTarget = 'wallPin_br';
+      else if (distBL < 0.08) hitTarget = 'wallPin_bl';
+    }
+
+    // Check Multi-Light Spheres if not hit wall pin
+    if (!hitTarget) {
+      for (const light of lightsList) {
+        const lightDist = Math.hypot(clickX * 100 - light.x * 100, clickY * 100 - light.y * 100);
+        if (lightDist < 7) {
+          hitTarget = `light_${light.id}`;
+          setActiveLightId(light.id);
+          break;
+        }
+      }
+    }
+
+    // Check 9 Vector Pins
+    if (!hitTarget && screenPins) {
       const pinDist = (p: { x: number; y: number }) => Math.hypot(clickX * 100 - p.x, clickY * 100 - p.y);
       if (pinDist(screenPins.tc) < 6) hitTarget = 'topCenter';
       else if (pinDist(screenPins.bc) < 6) hitTarget = 'bottomCenter';
@@ -1056,7 +1520,17 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
       else if (pinDist(screenPins.center) < 7) hitTarget = 'center';
     }
 
-    setDragTarget(hitTarget || 'center');
+    // Check Ctrl Free Orbit on canvas body
+    const isCtrl = e.ctrlKey || e.metaKey || isCtrlActive;
+    if (!hitTarget) {
+      if (isCtrl) {
+        hitTarget = 'canvasOrbit';
+      } else {
+        hitTarget = 'center';
+      }
+    }
+
+    setDragTarget(hitTarget);
 
     dragStart.current = {
       x: clickX,
@@ -1067,6 +1541,12 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
       origAngle: wallAngle,
       origPitch: pitchAngle,
       origRoll: rollAngle,
+      origQuad: {
+        topLeft: { ...wallQuad.topLeft },
+        topRight: { ...wallQuad.topRight },
+        bottomRight: { ...wallQuad.bottomRight },
+        bottomLeft: { ...wallQuad.bottomLeft },
+      },
     };
   };
 
@@ -1077,10 +1557,26 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
     const curY = (e.clientY - rect.top) / rect.height;
 
     if (!dragTarget) {
-      const lightDist = Math.hypot(curX * 100 - lightPos3D.x * 100, curY * 100 - lightPos3D.y * 100);
-      if (lightDist < 7) {
-        setHoveredTarget('lightSphere');
-      } else if (screenPins) {
+      if (isCalibratingWall) {
+        const distTL = Math.hypot(curX - wallQuad.topLeft.x, curY - wallQuad.topLeft.y);
+        const distTR = Math.hypot(curX - wallQuad.topRight.x, curY - wallQuad.topRight.y);
+        const distBR = Math.hypot(curX - wallQuad.bottomRight.x, curY - wallQuad.bottomRight.y);
+        const distBL = Math.hypot(curX - wallQuad.bottomLeft.x, curY - wallQuad.bottomLeft.y);
+        if (distTL < 0.08) { setHoveredTarget('wallPin_tl'); return; }
+        if (distTR < 0.08) { setHoveredTarget('wallPin_tr'); return; }
+        if (distBR < 0.08) { setHoveredTarget('wallPin_br'); return; }
+        if (distBL < 0.08) { setHoveredTarget('wallPin_bl'); return; }
+      }
+
+      for (const light of lightsList) {
+        const lightDist = Math.hypot(curX * 100 - light.x * 100, curY * 100 - light.y * 100);
+        if (lightDist < 7) {
+          setHoveredTarget(`light_${light.id}`);
+          return;
+        }
+      }
+
+      if (screenPins) {
         const pinDist = (p: { x: number; y: number }) => Math.hypot(curX * 100 - p.x, curY * 100 - p.y);
         if (pinDist(screenPins.tc) < 6) setHoveredTarget('topCenter');
         else if (pinDist(screenPins.bc) < 6) setHoveredTarget('bottomCenter');
@@ -1102,13 +1598,46 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
     const deltaY = curY - dragStart.current.y;
     const isCtrl = e.ctrlKey || e.metaKey || isCtrlActive;
 
-    if (dragTarget === 'lightSphere') {
-      // Free drag 3D Light Sphere across canvas
+    // 1. Dragging Wall Corner Pin
+    if (dragTarget.startsWith('wallPin_')) {
+      const clampedX = Math.max(0.02, Math.min(0.98, curX));
+      const clampedY = Math.max(0.02, Math.min(0.98, curY));
+
+      const nextQuad = { ...wallQuad };
+      if (dragTarget === 'wallPin_tl') nextQuad.topLeft = { x: clampedX, y: clampedY };
+      if (dragTarget === 'wallPin_tr') nextQuad.topRight = { x: clampedX, y: clampedY };
+      if (dragTarget === 'wallPin_br') nextQuad.bottomRight = { x: clampedX, y: clampedY };
+      if (dragTarget === 'wallPin_bl') nextQuad.bottomLeft = { x: clampedX, y: clampedY };
+
+      setWallQuad(nextQuad);
+
+      // Recalculate perspective slopes from quad
+      const topW = nextQuad.topRight.x - nextQuad.topLeft.x;
+      const botW = nextQuad.bottomRight.x - nextQuad.bottomLeft.x;
+      const leftH = nextQuad.bottomLeft.y - nextQuad.topLeft.y;
+      const rightH = nextQuad.bottomRight.y - nextQuad.topRight.y;
+      const avgH = Math.max(0.01, (rightH + leftH) / 2);
+      const avgW = Math.max(0.01, (topW + botW) / 2);
+
+      const calcAngle = Math.round(((rightH - leftH) / avgH) * 55);
+      const calcPitch = Math.round(((topW - botW) / avgW) * 55);
+
+      setWallCalibratedAngle(Math.max(-60, Math.min(60, calcAngle)));
+      setWallCalibratedPitch(Math.max(-75, Math.min(75, calcPitch)));
+      setWallAngle(Math.max(-60, Math.min(60, calcAngle)));
+      setPitchAngle(Math.max(-75, Math.min(75, calcPitch)));
+    }
+    // 2. Dragging Light Sphere Gizmo
+    else if (dragTarget.startsWith('light_')) {
+      const lightId = dragTarget.replace('light_', '');
       const newX = Math.max(0.05, Math.min(0.95, curX));
       const newY = Math.max(0.05, Math.min(0.95, curY));
-      setLightPos3D((prev) => ({ ...prev, x: newX, y: newY }));
 
-      // Real-time calculated reflection angle towards light sphere
+      setLightsList((prev) =>
+        prev.map((l) => (l.id === lightId ? { ...l, x: newX, y: newY } : l))
+      );
+
+      // Synchronize reflection angle & shadow angle for active light
       const frameCenterX = screenPins ? screenPins.center.x / 100 : centerX;
       const frameCenterY = screenPins ? screenPins.center.y / 100 : centerY;
       const angleRad = Math.atan2(newY - frameCenterY, newX - frameCenterX);
@@ -1118,78 +1647,94 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
 
       setReflectionAngleDeg(positiveReflDeg);
       setShadowAngleDeg(oppShadowDeg);
-    } else if (dragTarget === 'center') {
-      let rawX = dragStart.current.origX + deltaX;
-      let rawY = dragStart.current.origY + deltaY;
-
+    }
+    // 3. Free Canvas 3D Orbit (Ctrl + Drag on Canvas)
+    else if (dragTarget === 'canvasOrbit') {
+      const newAngle = Math.max(-85, Math.min(85, Math.round(dragStart.current.origAngle + deltaX * 160)));
+      const newPitch = Math.max(-75, Math.min(75, Math.round(dragStart.current.origPitch - deltaY * 150)));
+      if (isCalibratingWall) {
+        setWallCalibratedAngle(newAngle);
+        setWallCalibratedPitch(newPitch);
+      }
+      setWallAngle(newAngle);
+      setPitchAngle(newPitch);
+    }
+    // 4. Moving Center Position (with Magnetic Guides)
+    else if (dragTarget === 'center') {
       if (isCtrl) {
-        // Ctrl Snapping Disabler: 100% free movement
+        // Ctrl + Drag on Center triggers 3D orbit
+        const newAngle = Math.max(-85, Math.min(85, Math.round(dragStart.current.origAngle + deltaX * 160)));
+        const newPitch = Math.max(-75, Math.min(75, Math.round(dragStart.current.origPitch - deltaY * 150)));
+        if (isCalibratingWall) {
+          setWallCalibratedAngle(newAngle);
+          setWallCalibratedPitch(newPitch);
+        }
+        setWallAngle(newAngle);
+        setPitchAngle(newPitch);
         setIsSnappedX(false);
         setIsSnappedY(false);
       } else {
-        // Smart Snapping (Center X = 0.5, Standard Hanging Y = 0.32, Center Y = 0.50)
-        if (Math.abs(rawX - 0.5) < 0.02) {
-          rawX = 0.5;
-          setIsSnappedX(true);
+        let rawX = dragStart.current.origX + deltaX;
+        let rawY = dragStart.current.origY + deltaY;
+
+        if (isSnappingEnabled) {
+          if (Math.abs(rawX - 0.5) < 0.02) {
+            rawX = 0.5;
+            setIsSnappedX(true);
+          } else {
+            setIsSnappedX(false);
+          }
+
+          if (Math.abs(rawY - 0.32) < 0.02) {
+            rawY = 0.32;
+            setIsSnappedY(true);
+          } else if (Math.abs(rawY - 0.5) < 0.02) {
+            rawY = 0.5;
+            setIsSnappedY(true);
+          } else {
+            setIsSnappedY(false);
+          }
         } else {
           setIsSnappedX(false);
-        }
-
-        if (Math.abs(rawY - 0.32) < 0.02) {
-          rawY = 0.32;
-          setIsSnappedY(true);
-        } else if (Math.abs(rawY - 0.5) < 0.02) {
-          rawY = 0.5;
-          setIsSnappedY(true);
-        } else {
           setIsSnappedY(false);
         }
-      }
 
-      setCenterX(Math.min(Math.max(rawX, 0.05), 0.95));
-      setCenterY(Math.min(Math.max(rawY, 0.05), 0.95));
-    } else if (dragTarget === 'topCenter') {
-      // Celestial Midpoint Pins + Ctrl: Aplanes/tilts frame (pitch), strictly locking wallAngle (yaw)
+        setCenterX(Math.min(Math.max(rawX, 0.05), 0.95));
+        setCenterY(Math.min(Math.max(rawY, 0.05), 0.95));
+      }
+    }
+    // 5. Celestial Midpoints (Pitch & Yaw)
+    else if (dragTarget === 'topCenter') {
       const newPitch = isCtrl
         ? Math.max(-75, Math.min(75, Math.round(dragStart.current.origPitch - deltaY * 150)))
         : Math.max(-30, Math.min(30, Math.round(dragStart.current.origPitch - deltaY * 100)));
-      if (isCalibratingWall) {
-        setWallCalibratedPitch(newPitch);
-      }
+      if (isCalibratingWall) setWallCalibratedPitch(newPitch);
       setPitchAngle(newPitch);
     } else if (dragTarget === 'bottomCenter') {
-      // Celestial Midpoint Pins + Ctrl: Aplanes/tilts frame (pitch), strictly locking wallAngle (yaw)
       const newPitch = isCtrl
         ? Math.max(-75, Math.min(75, Math.round(dragStart.current.origPitch + deltaY * 150)))
         : Math.max(-30, Math.min(30, Math.round(dragStart.current.origPitch + deltaY * 100)));
-      if (isCalibratingWall) {
-        setWallCalibratedPitch(newPitch);
-      }
+      if (isCalibratingWall) setWallCalibratedPitch(newPitch);
       setPitchAngle(newPitch);
     } else if (dragTarget === 'leftCenter') {
-      // Yaw adjustment strictly locking pitchAngle
       const newAngle = isCtrl
         ? Math.max(-85, Math.min(85, Math.round(dragStart.current.origAngle - deltaX * 160)))
         : Math.max(-60, Math.min(60, Math.round(dragStart.current.origAngle - deltaX * 120)));
-      if (isCalibratingWall) {
-        setWallCalibratedAngle(newAngle);
-      }
+      if (isCalibratingWall) setWallCalibratedAngle(newAngle);
       setWallAngle(newAngle);
     } else if (dragTarget === 'rightCenter') {
-      // Yaw adjustment strictly locking pitchAngle
       const newAngle = isCtrl
         ? Math.max(-85, Math.min(85, Math.round(dragStart.current.origAngle + deltaX * 160)))
         : Math.max(-60, Math.min(60, Math.round(dragStart.current.origAngle + deltaX * 120)));
-      if (isCalibratingWall) {
-        setWallCalibratedAngle(newAngle);
-      }
+      if (isCalibratingWall) setWallCalibratedAngle(newAngle);
       setWallAngle(newAngle);
-    } else if (['topLeft', 'topRight', 'bottomRight', 'bottomLeft'].includes(dragTarget)) {
+    }
+    // 6. Corner Pins (Proportional Scale or Ctrl: Z-Roll)
+    else if (['topLeft', 'topRight', 'bottomRight', 'bottomLeft'].includes(dragTarget)) {
       const centerPxX = (screenPins ? screenPins.center.x / 100 : centerX) * rect.width;
       const centerPxY = (screenPins ? screenPins.center.y / 100 : centerY) * rect.height;
 
       if (isCtrl) {
-        // Ctrl + Corner Drag: Rotation in the same plane (Z-roll)
         const startMouseAngle = Math.atan2(
           dragStart.current.y * rect.height - centerPxY,
           dragStart.current.x * rect.width - centerPxX
@@ -1199,7 +1744,6 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
         const newRoll = Math.max(-45, Math.min(45, Math.round(dragStart.current.origRoll + diffDeg)));
         setRollAngle(newRoll);
       } else {
-        // Normal Corner Drag: ONLY Scale (proportional scaling)
         const startDist = Math.hypot(
           dragStart.current.x * rect.width - centerPxX,
           dragStart.current.y * rect.height - centerPxY
@@ -1224,6 +1768,7 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
   };
 
   const handleToggleWallCalibration = () => {
+    pushSnapshot();
     if (isCalibratingWall) {
       setIsCalibratingWall(false);
       setIsWallAnchored(true);
@@ -1237,6 +1782,7 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
   };
 
   const handleAutoCenter = () => {
+    pushSnapshot();
     setCenterX(0.5);
     setCenterY(0.32);
     setWallAngle(0);
@@ -1252,6 +1798,7 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
   };
 
   const handlePlacementModeChange = (mode: 'wall' | 'shelf') => {
+    pushSnapshot();
     setPlacementMode(mode);
     if (mode === 'shelf') {
       setShadowContactOcclusion(80);
@@ -1266,6 +1813,36 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
     }
   };
 
+  // Add Light to Multi-Light list
+  const handleAddLight = () => {
+    if (lightsList.length >= 4) return;
+    pushSnapshot();
+    const newId = `light_${Date.now()}`;
+    const newIdx = lightsList.length + 1;
+    const newLight: LightSource3D = {
+      id: newId,
+      name: `Foco ${newIdx}`,
+      x: Math.min(0.85, 0.25 * newIdx),
+      y: 0.25,
+      z: 1.0,
+      intensity: 100,
+    };
+    setLightsList([...lightsList, newLight]);
+    setActiveLightId(newId);
+  };
+
+  // Remove Light from Multi-Light list
+  const handleRemoveLight = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (lightsList.length <= 1) return;
+    pushSnapshot();
+    const filtered = lightsList.filter((l) => l.id !== id);
+    setLightsList(filtered);
+    if (activeLightId === id) {
+      setActiveLightId(filtered[0]?.id || '');
+    }
+  };
+
   // Full Persistence: Save all 3D, optical, color & shadow parameters
   const handleSave = () => {
     const artAspect = threeState.current.artAspect || 1.0;
@@ -1274,6 +1851,7 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
 
     const finalWallAngle = isWallAnchored ? wallCalibratedAngle : wallAngle;
     const finalPitchAngle = isWallAnchored ? wallCalibratedPitch : pitchAngle;
+    const activeLight = lightsList.find((l) => l.id === activeLightId) || lightsList[0] || { x: 0.75, y: 0.25, z: 1.0, intensity: 100 };
 
     const updatedEnv: EnvironmentScene = {
       ...environment,
@@ -1293,11 +1871,14 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
           isWallAnchored,
           wallCalibratedAngle,
           wallCalibratedPitch,
-          sunIntensity,
+          wallQuad,
+          lightsList,
+          isSnappingEnabled,
+          sunIntensity: activeLight.intensity ?? sunIntensity,
           ceilingLightsEnabled,
           ceilingLightTemp,
-          lightPos3D,
-          lightSource3D: lightPos3D,
+          lightPos3D: { x: activeLight.x, y: activeLight.y, z: activeLight.z },
+          lightSource3D: { x: activeLight.x, y: activeLight.y, z: activeLight.z },
           shadowBlur,
           shadowIntensity,
           shadowStyleIntensity: shadowIntensity,
@@ -1315,6 +1896,7 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
           weatherPreset,
           wallHarmonization,
           shadowPreset,
+          // Artwork Grading
           temperature,
           tint,
           brightness,
@@ -1325,7 +1907,51 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
           blacks,
           hue,
           saturation,
+          vignette,
           invert,
+          adjust: {
+            temperature,
+            tint,
+            brightness,
+            contrast,
+            highlights,
+            shadowsTone,
+            whites,
+            blacks,
+            hue,
+            saturation,
+            vignette,
+            invert,
+          },
+          // Background Mockup Grading
+          adjustBg: {
+            temperature: temperatureBg,
+            tint: tintBg,
+            brightness: brightnessBg,
+            contrast: contrastBg,
+            highlights: highlightsBg,
+            shadowsTone: shadowsToneBg,
+            whites: whitesBg,
+            blacks: blacksBg,
+            hue: hueBg,
+            saturation: saturationBg,
+            vignette: vignetteBg,
+            invert: invertBg,
+          },
+          bgAdjust: {
+            temperature: temperatureBg,
+            tint: tintBg,
+            brightness: brightnessBg,
+            contrast: contrastBg,
+            highlights: highlightsBg,
+            shadowsTone: shadowsToneBg,
+            whites: whitesBg,
+            blacks: blacksBg,
+            hue: hueBg,
+            saturation: saturationBg,
+            vignette: vignetteBg,
+            invert: invertBg,
+          },
           quad: {
             topLeft: { x: centerX - halfW, y: centerY - halfH },
             topRight: { x: centerX + halfW, y: centerY - halfH },
@@ -1343,8 +1969,8 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
 
     setProductConfig({
       placementMode,
-      lightPos3D,
-      lightSource3D: lightPos3D,
+      lightPos3D: { x: activeLight.x, y: activeLight.y, z: activeLight.z },
+      lightSource3D: { x: activeLight.x, y: activeLight.y, z: activeLight.z },
       wallAngle: finalWallAngle,
       pitchDeg: finalPitchAngle,
       reflectionAngleDeg,
@@ -1356,7 +1982,7 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
       isWallAnchored,
       wallCalibratedAngle,
       wallCalibratedPitch,
-      sunIntensity,
+      sunIntensity: activeLight.intensity ?? sunIntensity,
       ceilingLightsEnabled,
       ceilingLightTemp,
       temperature,
@@ -1376,6 +2002,8 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
 
     onClose();
   };
+
+  const selectedLight = lightsList.find((l) => l.id === activeLightId) || lightsList[0];
 
   return (
     <div
@@ -1409,7 +2037,7 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
           boxShadow: '0 32px 80px rgba(0, 0, 0, 0.8), inset 0 1px 0 rgba(255, 255, 255, 0.15)',
         }}
       >
-        {/* Top Header */}
+        {/* Top Header Toolbar */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
             <span
@@ -1436,6 +2064,81 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {/* Undo Button */}
+            <button
+              onClick={handleUndo}
+              disabled={!canUndo}
+              title="Deshacer cambio (Ctrl + Z)"
+              style={{
+                background: canUndo ? 'rgba(255, 255, 255, 0.08)' : 'rgba(255, 255, 255, 0.02)',
+                border: '1px solid rgba(255, 255, 255, 0.1)',
+                color: canUndo ? '#ffffff' : '#475569',
+                padding: '6px 10px',
+                borderRadius: '8px',
+                fontSize: '11px',
+                fontWeight: 600,
+                cursor: canUndo ? 'pointer' : 'not-allowed',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '5px',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              <Undo2 size={13} />
+              <span>Deshacer</span>
+            </button>
+
+            {/* Redo Button */}
+            <button
+              onClick={handleRedo}
+              disabled={!canRedo}
+              title="Rehacer cambio (Ctrl + Y)"
+              style={{
+                background: canRedo ? 'rgba(255, 255, 255, 0.08)' : 'rgba(255, 255, 255, 0.02)',
+                border: '1px solid rgba(255, 255, 255, 0.1)',
+                color: canRedo ? '#ffffff' : '#475569',
+                padding: '6px 10px',
+                borderRadius: '8px',
+                fontSize: '11px',
+                fontWeight: 600,
+                cursor: canRedo ? 'pointer' : 'not-allowed',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '5px',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              <Redo2 size={13} />
+              <span>Rehacer</span>
+            </button>
+
+            {/* Magnet Toggle Button */}
+            <button
+              onClick={() => {
+                pushSnapshot();
+                setIsSnappingEnabled(!isSnappingEnabled);
+              }}
+              title={isSnappingEnabled ? 'Guías Magnéticas: ACTIVADAS' : 'Guías Magnéticas: DESACTIVADAS'}
+              style={{
+                background: isSnappingEnabled ? 'rgba(222, 35, 103, 0.15)' : 'rgba(255, 255, 255, 0.04)',
+                border: isSnappingEnabled ? '1px solid #de2367' : '1px solid rgba(255, 255, 255, 0.08)',
+                color: isSnappingEnabled ? '#de2367' : '#94a3b8',
+                padding: '6px 10px',
+                borderRadius: '8px',
+                fontSize: '11px',
+                fontWeight: 700,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '5px',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              <Magnet size={13} />
+              <span>Imán: {isSnappingEnabled ? 'ON' : 'OFF'}</span>
+            </button>
+
+            {/* Auto-Centrar */}
             <button
               onClick={handleAutoCenter}
               style={{
@@ -1453,9 +2156,10 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
               }}
             >
               <Target size={14} />
-              <span>Auto-Centrar en Pared</span>
+              <span>Auto-Centrar</span>
             </button>
 
+            {/* Close Button */}
             <button
               onClick={onClose}
               style={{
@@ -1475,7 +2179,7 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
 
         {/* 2-Column Grid */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 410px', gap: '24px', alignItems: 'start' }}>
-          {/* Left Canvas with Interactive Vector Pins */}
+          {/* Left Canvas with Interactive Vector Pins & Multi-Light Gizmo */}
           <div
             ref={containerRef}
             onMouseEnter={() => setIsHovered(true)}
@@ -1496,8 +2200,9 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
               userSelect: 'none',
               cursor: (() => {
                 if (dragTarget) {
-                  if (dragTarget === 'lightSphere') return 'grabbing';
-                  if (isCtrlActive) return 'grabbing';
+                  if (dragTarget.startsWith('wallPin_')) return 'crosshair';
+                  if (dragTarget.startsWith('light_')) return 'grabbing';
+                  if (isCtrlActive || dragTarget === 'canvasOrbit') return 'grabbing';
                   if (dragTarget === 'center') return 'grabbing';
                   if (dragTarget === 'topCenter' || dragTarget === 'bottomCenter') return 'ns-resize';
                   if (dragTarget === 'leftCenter' || dragTarget === 'rightCenter') return 'ew-resize';
@@ -1506,7 +2211,8 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                   return 'grabbing';
                 }
                 if (hoveredTarget) {
-                  if (hoveredTarget === 'lightSphere') return 'grab';
+                  if (hoveredTarget.startsWith('wallPin_')) return 'crosshair';
+                  if (hoveredTarget.startsWith('light_')) return 'grab';
                   if (isCtrlActive) return 'grab';
                   if (hoveredTarget === 'center') return 'grab';
                   if (hoveredTarget === 'topCenter' || hoveredTarget === 'bottomCenter') return 'ns-resize';
@@ -1529,7 +2235,7 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
               }}
             />
 
-            {/* Auto-Hide Guidelines, Pins, Outline & Tips (visible on hover or drag) */}
+            {/* Auto-Hide Guidelines, Pins, Outline & Tips */}
             <div
               style={{
                 position: 'absolute',
@@ -1538,7 +2244,7 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                 right: 0,
                 bottom: 0,
                 pointerEvents: 'none',
-                opacity: isHovered || dragTarget !== null ? 1 : 0,
+                opacity: isHovered || dragTarget !== null || isCalibratingWall ? 1 : 0,
                 transition: 'opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
               }}
             >
@@ -1635,82 +2341,218 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                 >
                   <RotateCcw size={12} />
                   <span>
-                    {dragTarget === 'topCenter' || dragTarget === 'bottomCenter' || hoveredTarget === 'topCenter' || hoveredTarget === 'bottomCenter'
-                      ? `Acostar objeto: ${pitchAngle > 0 ? `+${pitchAngle}°` : `${pitchAngle}°`} (Ctrl activo - Yaw bloqueado)`
-                      : dragTarget === 'leftCenter' || dragTarget === 'rightCenter' || hoveredTarget === 'leftCenter' || hoveredTarget === 'rightCenter'
-                      ? `Perspectiva / Giro: ${wallAngle > 0 ? `+${wallAngle}°` : `${wallAngle}°`} (Ctrl activo - Pitch bloqueado)`
-                      : dragTarget === 'center' || hoveredTarget === 'center'
-                      ? `Movimiento libre (Snapping magnético desactivado)`
-                      : `Rotación Z: ${rollAngle > 0 ? `+${rollAngle}°` : `${rollAngle}°`} (Ctrl activo)`}
+                    {dragTarget === 'canvasOrbit' || (!dragTarget && isHovered)
+                      ? `Órbita 3D Libre (Arrastra para girar Ángulo e Inclinación | Rueda para Zoom)`
+                      : dragTarget === 'topCenter' || dragTarget === 'bottomCenter'
+                      ? `Acostar objeto: ${pitchAngle > 0 ? `+${pitchAngle}°` : `${pitchAngle}°`}`
+                      : dragTarget === 'leftCenter' || dragTarget === 'rightCenter'
+                      ? `Perspectiva / Giro: ${wallAngle > 0 ? `+${wallAngle}°` : `${wallAngle}°`}`
+                      : `Rotación Z: ${rollAngle > 0 ? `+${rollAngle}°` : `${rollAngle}°`}`}
                   </span>
                 </div>
               )}
 
-              {/* Vector Quad Polygon Outline & Subtle Ray to Light Sphere */}
-              {screenPins && (
-                <svg
-                  style={{
-                    position: 'absolute',
-                    top: 0,
-                    left: 0,
-                    width: '100%',
-                    height: '100%',
-                    pointerEvents: 'none',
-                  }}
-                >
-                  <polygon
-                    points={`${screenPins.tl.x}%,${screenPins.tl.y}% ${screenPins.tr.x}%,${screenPins.tr.y}% ${screenPins.br.x}%,${screenPins.br.y}% ${screenPins.bl.x}%,${screenPins.bl.y}%`}
-                    fill="rgba(222, 35, 103, 0.06)"
-                    stroke="#de2367"
-                    strokeWidth="1.5"
-                    strokeDasharray="4 4"
-                  />
-                  {/* Subtle Ray from Frame Center to 3D Light Sphere */}
-                  <line
-                    x1={`${screenPins.center.x}%`}
-                    y1={`${screenPins.center.y}%`}
-                    x2={`${lightPos3D.x * 100}%`}
-                    y2={`${lightPos3D.y * 100}%`}
-                    stroke="#fbbf24"
-                    strokeWidth="1.5"
-                    strokeDasharray="3 3"
-                    opacity={dragTarget === 'lightSphere' || hoveredTarget === 'lightSphere' ? 0.95 : 0.6}
-                  />
-                </svg>
-              )}
-
-              {/* Interactive 3D Light Sphere Gizmo on Canvas */}
-              <div
-                title="Foco de Luz 3D: Arrastra para posicionar el sol, reflejos y sombras"
+              {/* SVG Overlay: Vector Quad Outline, Rays to Light Spheres, and Vanishing Wall Grid */}
+              <svg
                 style={{
                   position: 'absolute',
-                  left: `${lightPos3D.x * 100}%`,
-                  top: `${lightPos3D.y * 100}%`,
-                  transform: 'translate(-50%, -50%)',
-                  width: '24px',
-                  height: '24px',
-                  borderRadius: '50%',
-                  background: 'radial-gradient(circle at 35% 35%, #fffbeb 15%, #f59e0b 65%, #b45309 100%)',
-                  border: '1.5px solid rgba(255, 255, 255, 0.9)',
-                  boxShadow:
-                    hoveredTarget === 'lightSphere' || dragTarget === 'lightSphere'
-                      ? '0 0 16px rgba(245, 158, 11, 0.6), 0 0 4px #ffffff'
-                      : '0 0 10px rgba(245, 158, 11, 0.4)',
+                  top: 0,
+                  left: 0,
+                  width: '100%',
+                  height: '100%',
                   pointerEvents: 'none',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  zIndex: 25,
-                  transition: dragTarget === 'lightSphere' ? 'none' : 'box-shadow 0.2s ease, transform 0.2s ease',
                 }}
               >
-                <Sun size={13} strokeWidth={2.2} color="#78350f" />
-              </div>
+                {/* Wall Calibration Converging Vanishing Grid Lines */}
+                {isCalibratingWall && (
+                  <g>
+                    {/* Perspective Quad Polygon */}
+                    <polygon
+                      points={`${wallQuad.topLeft.x * 100}%,${wallQuad.topLeft.y * 100}% ${wallQuad.topRight.x * 100}%,${wallQuad.topRight.y * 100}% ${wallQuad.bottomRight.x * 100}%,${wallQuad.bottomRight.y * 100}% ${wallQuad.bottomLeft.x * 100}%,${wallQuad.bottomLeft.y * 100}%`}
+                      fill="rgba(56, 189, 248, 0.08)"
+                      stroke="#38bdf8"
+                      strokeWidth="2"
+                    />
 
-              {/* Interactive Vector Pin Handles */}
-              {screenPins && (
+                    {/* Vertical Converging Vanishing Lines */}
+                    {[0.15, 0.3, 0.45, 0.6, 0.75, 0.9].map((t, idx) => {
+                      const topX = wallQuad.topLeft.x + (wallQuad.topRight.x - wallQuad.topLeft.x) * t;
+                      const topY = wallQuad.topLeft.y + (wallQuad.topRight.y - wallQuad.topLeft.y) * t;
+                      const botX = wallQuad.bottomLeft.x + (wallQuad.bottomRight.x - wallQuad.bottomLeft.x) * t;
+                      const botY = wallQuad.bottomLeft.y + (wallQuad.bottomRight.y - wallQuad.bottomLeft.y) * t;
+                      return (
+                        <line
+                          key={`v-grid-${idx}`}
+                          x1={`${topX * 100}%`}
+                          y1={`${topY * 100}%`}
+                          x2={`${botX * 100}%`}
+                          y2={`${botY * 100}%`}
+                          stroke="#38bdf8"
+                          strokeWidth="1.2"
+                          strokeDasharray="4 3"
+                          opacity="0.75"
+                        />
+                      );
+                    })}
+
+                    {/* Horizontal Converging Vanishing Lines */}
+                    {[0.15, 0.3, 0.45, 0.6, 0.75, 0.9].map((t, idx) => {
+                      const leftX = wallQuad.topLeft.x + (wallQuad.bottomLeft.x - wallQuad.topLeft.x) * t;
+                      const leftY = wallQuad.topLeft.y + (wallQuad.bottomLeft.y - wallQuad.topLeft.y) * t;
+                      const rightX = wallQuad.topRight.x + (wallQuad.bottomRight.x - wallQuad.topRight.x) * t;
+                      const rightY = wallQuad.topRight.y + (wallQuad.bottomRight.y - wallQuad.topRight.y) * t;
+                      return (
+                        <line
+                          key={`h-grid-${idx}`}
+                          x1={`${leftX * 100}%`}
+                          y1={`${leftY * 100}%`}
+                          x2={`${rightX * 100}%`}
+                          y2={`${rightY * 100}%`}
+                          stroke="#38bdf8"
+                          strokeWidth="1.2"
+                          strokeDasharray="4 3"
+                          opacity="0.75"
+                        />
+                      );
+                    })}
+                  </g>
+                )}
+
+                {/* Frame Artwork Quad Outline & Subtle Rays to All Light Spheres */}
+                {screenPins && (
+                  <>
+                    <polygon
+                      points={`${screenPins.tl.x}%,${screenPins.tl.y}% ${screenPins.tr.x}%,${screenPins.tr.y}% ${screenPins.br.x}%,${screenPins.br.y}% ${screenPins.bl.x}%,${screenPins.bl.y}%`}
+                      fill="rgba(222, 35, 103, 0.06)"
+                      stroke="#de2367"
+                      strokeWidth="1.5"
+                      strokeDasharray="4 4"
+                    />
+
+                    {/* Glowing Rays from Frame Center to Each 3D Light */}
+                    {lightsList.map((l) => {
+                      const isActive = l.id === activeLightId;
+                      return (
+                        <line
+                          key={`ray-${l.id}`}
+                          x1={`${screenPins.center.x}%`}
+                          y1={`${screenPins.center.y}%`}
+                          x2={`${l.x * 100}%`}
+                          y2={`${l.y * 100}%`}
+                          stroke={isActive ? '#fbbf24' : '#f59e0b'}
+                          strokeWidth={isActive ? '1.8' : '1'}
+                          strokeDasharray={isActive ? '4 3' : '2 3'}
+                          opacity={isActive ? 0.95 : 0.45}
+                        />
+                      );
+                    })}
+                  </>
+                )}
+              </svg>
+
+              {/* 4 Draggable Wall Corner Cyan Pins (Visible when Calibrating Wall) */}
+              {isCalibratingWall && (
                 <>
-                  {/* 4 Corner Pins (Proportional Scale / Ctrl: Z-Rotation) */}
+                  {[
+                    { id: 'wallPin_tl', label: 'Superior Izq', pt: wallQuad.topLeft },
+                    { id: 'wallPin_tr', label: 'Superior Der', pt: wallQuad.topRight },
+                    { id: 'wallPin_br', label: 'Inferior Der', pt: wallQuad.bottomRight },
+                    { id: 'wallPin_bl', label: 'Inferior Izq', pt: wallQuad.bottomLeft },
+                  ].map((pin) => (
+                    <div
+                      key={pin.id}
+                      title={`Esquina de Pared: ${pin.label} (Arrastra para calibrar perspectiva real)`}
+                      style={{
+                        position: 'absolute',
+                        left: `${pin.pt.x * 100}%`,
+                        top: `${pin.pt.y * 100}%`,
+                        transform: 'translate(-50%, -50%)',
+                        width: '18px',
+                        height: '18px',
+                        borderRadius: '50%',
+                        background: '#0284c7',
+                        border: '2.5px solid #ffffff',
+                        boxShadow: '0 0 14px #38bdf8, 0 0 4px #ffffff',
+                        pointerEvents: 'none',
+                        zIndex: 35,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: '6px',
+                          height: '6px',
+                          borderRadius: '50%',
+                          background: '#ffffff',
+                        }}
+                      />
+                    </div>
+                  ))}
+                </>
+              )}
+
+              {/* Multi-Light 3D Spheres on Canvas */}
+              {lightsList.map((light, index) => {
+                const isActive = light.id === activeLightId;
+                const isBeingDragged = dragTarget === `light_${light.id}`;
+                const isBeingHovered = hoveredTarget === `light_${light.id}`;
+
+                return (
+                  <div
+                    key={light.id}
+                    title={`${light.name || `Foco ${index + 1}`}: Arrastra para iluminar desde este ángulo (${light.intensity ?? 100}%)`}
+                    style={{
+                      position: 'absolute',
+                      left: `${light.x * 100}%`,
+                      top: `${light.y * 100}%`,
+                      transform: 'translate(-50%, -50%)',
+                      width: isActive ? '28px' : '22px',
+                      height: isActive ? '28px' : '22px',
+                      borderRadius: '50%',
+                      background: isActive
+                        ? 'radial-gradient(circle at 35% 35%, #fffbeb 15%, #f59e0b 65%, #b45309 100%)'
+                        : 'radial-gradient(circle at 35% 35%, #fef3c7 15%, #d97706 70%, #78350f 100%)',
+                      border: isActive ? '2px solid #ffffff' : '1.5px solid rgba(255, 255, 255, 0.7)',
+                      boxShadow:
+                        isActive || isBeingHovered || isBeingDragged
+                          ? '0 0 20px rgba(245, 158, 11, 0.8), 0 0 6px #ffffff'
+                          : '0 0 10px rgba(245, 158, 11, 0.4)',
+                      pointerEvents: 'none',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      zIndex: isActive ? 30 : 25,
+                      transition: isBeingDragged ? 'none' : 'all 0.2s ease',
+                    }}
+                  >
+                    <Sun size={isActive ? 14 : 11} strokeWidth={2.2} color="#78350f" />
+                    {lightsList.length > 1 && (
+                      <span
+                        style={{
+                          position: 'absolute',
+                          bottom: '-14px',
+                          fontSize: '8.5px',
+                          fontWeight: 800,
+                          color: isActive ? '#fbbf24' : '#cbd5e1',
+                          background: 'rgba(0,0,0,0.7)',
+                          padding: '1px 4px',
+                          borderRadius: '4px',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {light.name || `#${index + 1}`}
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
+
+              {/* 9 Interactive Vector Pin Handles for Frame Placement */}
+              {!isCalibratingWall && screenPins && (
+                <>
+                  {/* 4 Corner Pins */}
                   <div
                     title="Esquina: Arrastra para escalar proporcionalmente. Ctrl + Arrastre para Rotación Z."
                     style={{
@@ -1776,10 +2618,9 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                     }}
                   />
 
-                  {/* 4 Celestial Midpoint Pins (Cyan #38bdf8) */}
-                  {/* Top Center Pin (tc) */}
+                  {/* 4 Celestial Midpoint Pins (Cyan) */}
                   <div
-                    title="Pin Superior: Inclinación Vertical (Pitch). Ctrl + Arrastre: Acostar objeto en repisa."
+                    title="Pin Superior: Inclinación Vertical (Pitch). Ctrl + Arrastre: Acostar objeto."
                     style={{
                       position: 'absolute',
                       left: `${screenPins.tc.x}%`,
@@ -1794,10 +2635,8 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                       pointerEvents: 'none',
                     }}
                   />
-
-                  {/* Bottom Center Pin (bc) */}
                   <div
-                    title="Pin Inferior: Inclinación Vertical (Pitch). Ctrl + Arrastre: Acostar objeto en repisa."
+                    title="Pin Inferior: Inclinación Vertical (Pitch). Ctrl + Arrastre: Acostar objeto."
                     style={{
                       position: 'absolute',
                       left: `${screenPins.bc.x}%`,
@@ -1812,10 +2651,8 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                       pointerEvents: 'none',
                     }}
                   />
-
-                  {/* Left Center Pin (lc) */}
                   <div
-                    title="Pin Lateral Izquierdo: Ángulo de Pared (Yaw). Ctrl + Arrastre: Perspectiva planar."
+                    title="Pin Lateral Izquierdo: Ángulo de Pared (Yaw)."
                     style={{
                       position: 'absolute',
                       left: `${screenPins.lc.x}%`,
@@ -1830,10 +2667,8 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                       pointerEvents: 'none',
                     }}
                   />
-
-                  {/* Right Center Pin (rc) */}
                   <div
-                    title="Pin Lateral Derecho: Ángulo de Pared (Yaw). Ctrl + Arrastre: Perspectiva planar."
+                    title="Pin Lateral Derecho: Ángulo de Pared (Yaw)."
                     style={{
                       position: 'absolute',
                       left: `${screenPins.rc.x}%`,
@@ -1894,16 +2729,16 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                 }}
               >
                 <span>
-                  📍 <strong>Centro</strong>: Mover (Ctrl: libre)
+                  📍 <strong>Centro</strong>: Mover ({isSnappingEnabled ? 'Imán activo' : 'Libre'})
                 </span>
                 <span>
-                  ☀️ <strong>Sol</strong>: Posición Luz 3D
+                  ☀️ <strong>Sol</strong>: Focos de Luz 3D
                 </span>
                 <span>
-                  ↔️/↕️ <strong>Pines Celestes</strong>: Inclinación / Pared (Ctrl: Acostar)
+                  ⌨️ <strong>Ctrl + Arrastre</strong>: Órbita 3D | <strong>Ctrl + Rueda</strong>: Zoom
                 </span>
                 <span>
-                  ⤡ <strong>Esquinas</strong>: Escala (Ctrl: Rotación Z)
+                  ⤡ <strong>Esquinas</strong>: Escalar (Ctrl: Rotación Z)
                 </span>
               </div>
             </div>
@@ -2036,7 +2871,7 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                         </span>
                         <span style={{ fontSize: '9.5px', color: isWallAnchored && !isCalibratingWall ? '#4ade80' : '#94a3b8' }}>
                           {isCalibratingWall
-                            ? 'Ajustando perspectiva 3D de la pared'
+                            ? 'Ajustando perspectiva 3D con 4 pines'
                             : isWallAnchored
                             ? '🔒 Pared Anclada (Orientación fija)'
                             : '🔓 Pared libre'}
@@ -2068,7 +2903,7 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: isCalibratingWall ? '10px' : '0' }}>
                     <span style={{ fontSize: '10px', color: '#94a3b8' }}>
                       {isCalibratingWall
-                        ? 'Alinea la grilla con las aristas reales de la pared en la imagen'
+                        ? 'Arrastra los 4 pines cian para hacer coincidir las líneas de fuga reales de la pared'
                         : 'Desliza el cuadro libremente sobre la pared calibrada'}
                     </span>
                     <button
@@ -2102,6 +2937,7 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                           step="1"
                           value={wallCalibratedAngle}
                           onChange={(e) => {
+                            pushSnapshot();
                             const v = parseInt(e.target.value);
                             setWallCalibratedAngle(v);
                             setWallAngle(v);
@@ -2121,6 +2957,7 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                           step="1"
                           value={wallCalibratedPitch}
                           onChange={(e) => {
+                            pushSnapshot();
                             const v = parseInt(e.target.value);
                             setWallCalibratedPitch(v);
                             setPitchAngle(v);
@@ -2219,7 +3056,7 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                   )}
                 </div>
 
-                {/* 1. Grosor del Cuadro (Espesor 3D con Canto) */}
+                {/* 2. Grosor del Cuadro (Espesor 3D con Canto) */}
                 <div
                   style={{
                     background: 'rgba(255, 255, 255, 0.03)',
@@ -2256,7 +3093,10 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                     ].map((b) => (
                       <button
                         key={b.label}
-                        onClick={() => setThicknessCm(b.val)}
+                        onClick={() => {
+                          pushSnapshot();
+                          setThicknessCm(b.val);
+                        }}
                         style={{
                           padding: '4px',
                           borderRadius: '6px',
@@ -2277,7 +3117,7 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                   </div>
                 </div>
 
-                {/* 2. Distancia a la Pared (Atraer / Empujar en Z) */}
+                {/* 3. Distancia a la Pared (Atraer / Empujar en Z) */}
                 <div
                   style={{
                     background: 'rgba(255, 255, 255, 0.03)',
@@ -2304,7 +3144,7 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                   />
                 </div>
 
-                {/* 3. Rotación Z (Roll / Diagonal) */}
+                {/* 4. Rotación Z (Roll / Diagonal) */}
                 <div
                   style={{
                     background: 'rgba(255, 255, 255, 0.03)',
@@ -2323,7 +3163,10 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                       </span>
                       {rollAngle !== 0 && (
                         <button
-                          onClick={() => setRollAngle(0)}
+                          onClick={() => {
+                            pushSnapshot();
+                            setRollAngle(0);
+                          }}
                           style={{
                             background: 'rgba(255,255,255,0.06)',
                             border: '1px solid rgba(255,255,255,0.1)',
@@ -2349,7 +3192,7 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                   />
                 </div>
 
-                {/* 4. Inclinación Vertical (Pitch / Repisa) */}
+                {/* 5. Inclinación Vertical (Pitch / Repisa) */}
                 <div
                   style={{
                     background: 'rgba(255, 255, 255, 0.03)',
@@ -2377,7 +3220,10 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                   />
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '4px' }}>
                     <button
-                      onClick={() => setPitchAngle(0)}
+                      onClick={() => {
+                        pushSnapshot();
+                        setPitchAngle(0);
+                      }}
                       style={{
                         padding: '4px',
                         borderRadius: '6px',
@@ -2396,7 +3242,10 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                       <RotateCcw size={10} /> 0º (Vertical)
                     </button>
                     <button
-                      onClick={() => setPitchAngle(15)}
+                      onClick={() => {
+                        pushSnapshot();
+                        setPitchAngle(15);
+                      }}
                       style={{
                         padding: '4px',
                         borderRadius: '6px',
@@ -2411,7 +3260,10 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                       {placementMode === 'shelf' ? 'Apoyado (+15º)' : '+15º Arriba'}
                     </button>
                     <button
-                      onClick={() => setPitchAngle(placementMode === 'shelf' ? 35 : -15)}
+                      onClick={() => {
+                        pushSnapshot();
+                        setPitchAngle(placementMode === 'shelf' ? 35 : -15);
+                      }}
                       style={{
                         padding: '4px',
                         borderRadius: '6px',
@@ -2426,7 +3278,10 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                       {placementMode === 'shelf' ? 'Inclinado (+35º)' : '-15º Abajo'}
                     </button>
                     <button
-                      onClick={() => setPitchAngle(70)}
+                      onClick={() => {
+                        pushSnapshot();
+                        setPitchAngle(70);
+                      }}
                       style={{
                         padding: '4px',
                         borderRadius: '6px',
@@ -2443,7 +3298,7 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                   </div>
                 </div>
 
-                {/* 5. Ángulo Horizontal (Pared) */}
+                {/* 6. Ángulo Horizontal (Pared) */}
                 <div
                   style={{
                     background: 'rgba(255, 255, 255, 0.03)',
@@ -2471,7 +3326,10 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                   />
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '4px' }}>
                     <button
-                      onClick={() => setWallAngle(0)}
+                      onClick={() => {
+                        pushSnapshot();
+                        setWallAngle(0);
+                      }}
                       style={{
                         padding: '4px',
                         borderRadius: '6px',
@@ -2490,7 +3348,10 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                       <RotateCcw size={10} /> 0º
                     </button>
                     <button
-                      onClick={() => setWallAngle(35)}
+                      onClick={() => {
+                        pushSnapshot();
+                        setWallAngle(35);
+                      }}
                       style={{
                         padding: '4px',
                         borderRadius: '6px',
@@ -2505,7 +3366,10 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                       35º
                     </button>
                     <button
-                      onClick={() => setWallAngle(-35)}
+                      onClick={() => {
+                        pushSnapshot();
+                        setWallAngle(-35);
+                      }}
                       style={{
                         padding: '4px',
                         borderRadius: '6px',
@@ -2520,7 +3384,10 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                       -35º
                     </button>
                     <button
-                      onClick={() => setWallAngle(90)}
+                      onClick={() => {
+                        pushSnapshot();
+                        setWallAngle(90);
+                      }}
                       style={{
                         padding: '4px',
                         borderRadius: '6px',
@@ -2537,7 +3404,7 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                   </div>
                 </div>
 
-                {/* 6. Escala del Cuadro */}
+                {/* 7. Escala del Cuadro */}
                 <div
                   style={{
                     background: 'rgba(255, 255, 255, 0.03)',
@@ -2561,86 +3428,10 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                     onChange={(e) => setScaleWidth(parseFloat(e.target.value))}
                   />
                 </div>
-
-                {/* 7. Armonización Lumínica con la Pared */}
-                <div
-                  style={{
-                    background: 'rgba(255, 255, 255, 0.03)',
-                    padding: '12px 14px',
-                    borderRadius: '12px',
-                    border: '1px solid rgba(255, 255, 255, 0.08)',
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                    <span style={{ fontSize: '11px', fontWeight: 600, color: '#ffffff' }}>
-                      🎨 Integración con la Habitación (Smart Match)
-                    </span>
-                    <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--accent-primary)' }}>
-                      {Math.round(wallHarmonization * 100)}%
-                    </span>
-                  </div>
-                  <input
-                    type="range"
-                    min="0"
-                    max="1"
-                    step="0.05"
-                    value={wallHarmonization}
-                    onChange={(e) => setWallHarmonization(parseFloat(e.target.value))}
-                    style={{ marginBottom: '8px' }}
-                  />
-
-                  {wallSample && (
-                    <div
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        background: 'rgba(0,0,0,0.3)',
-                        padding: '6px 10px',
-                        borderRadius: '8px',
-                        border: '1px solid rgba(255,255,255,0.06)',
-                      }}
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <div
-                          style={{
-                            width: '14px',
-                            height: '14px',
-                            borderRadius: '4px',
-                            background: wallSample.hexColor,
-                            border: '1px solid rgba(255,255,255,0.2)',
-                          }}
-                        />
-                        <span style={{ fontSize: '10px', color: '#cbd5e1' }}>
-                          {wallSample.luminance < 0.4
-                            ? 'Ambiente Moody'
-                            : wallSample.luminance > 0.75
-                            ? 'Ambiente Luminoso'
-                            : 'Ambiente Neutro'}
-                        </span>
-                      </div>
-                      <button
-                        onClick={() => setWallHarmonization(0.35)}
-                        style={{
-                          padding: '3px 8px',
-                          borderRadius: '5px',
-                          fontSize: '9px',
-                          fontWeight: 600,
-                          background: 'rgba(255,255,255,0.08)',
-                          color: '#ffffff',
-                          border: 'none',
-                          cursor: 'pointer',
-                        }}
-                      >
-                        Auto (35%)
-                      </button>
-                    </div>
-                  )}
-                </div>
               </div>
             )}
 
-            {/* TAB 2: FULL CANVA ADJUSTMENT SUITE (60FPS THROTTLED) */}
+            {/* TAB 2: FULL DUAL-DESTINATION PRO COLOR GRADING */}
             {activeTab === 'color' && (
               <div
                 style={{
@@ -2655,7 +3446,85 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                   gap: '12px',
                 }}
               >
-                {/* 1. Balance de Blancos */}
+                {/* Destination Selector: Cuadro vs Mockup Fondo */}
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: '1fr 1fr',
+                    gap: '6px',
+                    background: 'rgba(0, 0, 0, 0.4)',
+                    padding: '4px',
+                    borderRadius: '10px',
+                    border: '1px solid rgba(255, 255, 255, 0.08)',
+                  }}
+                >
+                  <button
+                    onClick={() => setAdjustDestination('artwork')}
+                    style={{
+                      padding: '8px 10px',
+                      borderRadius: '8px',
+                      fontSize: '11px',
+                      fontWeight: adjustDestination === 'artwork' ? 700 : 500,
+                      border:
+                        adjustDestination === 'artwork'
+                          ? '1.5px solid var(--accent-primary)'
+                          : '1px solid transparent',
+                      background:
+                        adjustDestination === 'artwork'
+                          ? 'var(--accent-primary-subtle)'
+                          : 'transparent',
+                      color: adjustDestination === 'artwork' ? '#ffffff' : '#94a3b8',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '6px',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    <ImageIcon size={13} />
+                    <span>🖼️ Ajustar Cuadro</span>
+                  </button>
+                  <button
+                    onClick={() => setAdjustDestination('background')}
+                    style={{
+                      padding: '8px 10px',
+                      borderRadius: '8px',
+                      fontSize: '11px',
+                      fontWeight: adjustDestination === 'background' ? 700 : 500,
+                      border:
+                        adjustDestination === 'background'
+                          ? '1.5px solid var(--accent-primary)'
+                          : '1px solid transparent',
+                      background:
+                        adjustDestination === 'background'
+                          ? 'var(--accent-primary-subtle)'
+                          : 'transparent',
+                      color: adjustDestination === 'background' ? '#ffffff' : '#94a3b8',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '6px',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    <Home size={13} />
+                    <span>🏠 Ajustar Fondo</span>
+                  </button>
+                </div>
+
+                {/* Subheader info */}
+                <div style={{ fontSize: '10.5px', color: '#94a3b8', display: 'flex', justifyContent: 'space-between' }}>
+                  <span>
+                    Grading activo:{' '}
+                    <strong style={{ color: 'var(--accent-primary)' }}>
+                      {adjustDestination === 'artwork' ? 'Obra de Arte (Cuadro)' : 'Habitación Mockup (Fondo)'}
+                    </strong>
+                  </span>
+                </div>
+
+                {/* 1. Iluminación y Exposición */}
                 <div>
                   <span
                     style={{
@@ -2666,192 +3535,273 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                       marginBottom: '6px',
                     }}
                   >
-                    💡 Balance de Blancos
+                    ☀️ Iluminación & Contraste
                   </span>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    {/* Brillo / Exposición */}
+                    <div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#ffffff', marginBottom: '2px' }}>
+                        <span>Exposición / Brillo</span>
+                        <span style={{ fontWeight: 700, color: 'var(--accent-primary)' }}>
+                          {adjustDestination === 'artwork' ? brightness : brightnessBg}
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        min="-100"
+                        max="100"
+                        value={adjustDestination === 'artwork' ? brightness : brightnessBg}
+                        onChange={(e) => {
+                          const v = parseInt(e.target.value);
+                          if (adjustDestination === 'artwork') setBrightness(v);
+                          else setBrightnessBg(v);
+                        }}
+                      />
+                    </div>
+
+                    {/* Contraste */}
+                    <div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#ffffff', marginBottom: '2px' }}>
+                        <span>Contraste</span>
+                        <span style={{ fontWeight: 700, color: 'var(--accent-primary)' }}>
+                          {adjustDestination === 'artwork' ? contrast : contrastBg}
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        min="-100"
+                        max="100"
+                        value={adjustDestination === 'artwork' ? contrast : contrastBg}
+                        onChange={(e) => {
+                          const v = parseInt(e.target.value);
+                          if (adjustDestination === 'artwork') setContrast(v);
+                          else setContrastBg(v);
+                        }}
+                      />
+                    </div>
+
+                    {/* Negros */}
+                    <div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#ffffff', marginBottom: '2px' }}>
+                        <span>Negros</span>
+                        <span style={{ fontWeight: 700, color: 'var(--accent-primary)' }}>
+                          {adjustDestination === 'artwork' ? blacks : blacksBg}
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        min="-100"
+                        max="100"
+                        value={adjustDestination === 'artwork' ? blacks : blacksBg}
+                        onChange={(e) => {
+                          const v = parseInt(e.target.value);
+                          if (adjustDestination === 'artwork') setBlacks(v);
+                          else setBlacksBg(v);
+                        }}
+                      />
+                    </div>
+
+                    {/* Sombras */}
+                    <div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#ffffff', marginBottom: '2px' }}>
+                        <span>Sombras</span>
+                        <span style={{ fontWeight: 700, color: 'var(--accent-primary)' }}>
+                          {adjustDestination === 'artwork' ? shadowsTone : shadowsToneBg}
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        min="-100"
+                        max="100"
+                        value={adjustDestination === 'artwork' ? shadowsTone : shadowsToneBg}
+                        onChange={(e) => {
+                          const v = parseInt(e.target.value);
+                          if (adjustDestination === 'artwork') setShadowsTone(v);
+                          else setShadowsToneBg(v);
+                        }}
+                      />
+                    </div>
+
+                    {/* Iluminaciones (Highlights) */}
+                    <div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#ffffff', marginBottom: '2px' }}>
+                        <span>Iluminaciones (Highlights)</span>
+                        <span style={{ fontWeight: 700, color: 'var(--accent-primary)' }}>
+                          {adjustDestination === 'artwork' ? highlights : highlightsBg}
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        min="-100"
+                        max="100"
+                        value={adjustDestination === 'artwork' ? highlights : highlightsBg}
+                        onChange={(e) => {
+                          const v = parseInt(e.target.value);
+                          if (adjustDestination === 'artwork') setHighlights(v);
+                          else setHighlightsBg(v);
+                        }}
+                      />
+                    </div>
+
+                    {/* Blancos */}
+                    <div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#ffffff', marginBottom: '2px' }}>
+                        <span>Blancos</span>
+                        <span style={{ fontWeight: 700, color: 'var(--accent-primary)' }}>
+                          {adjustDestination === 'artwork' ? whites : whitesBg}
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        min="-100"
+                        max="100"
+                        value={adjustDestination === 'artwork' ? whites : whitesBg}
+                        onChange={(e) => {
+                          const v = parseInt(e.target.value);
+                          if (adjustDestination === 'artwork') setWhites(v);
+                          else setWhitesBg(v);
+                        }}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* 2. Color & Tonalidad */}
+                <div>
+                  <span
+                    style={{
+                      fontSize: '11px',
+                      fontWeight: 700,
+                      color: 'var(--accent-primary)',
+                      display: 'block',
+                      marginBottom: '6px',
+                    }}
+                  >
+                    🎨 Balance de Blancos & Color
+                  </span>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    {/* Temperatura */}
                     <div>
                       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#ffffff', marginBottom: '2px' }}>
                         <span>Temperatura</span>
                         <span
                           style={{
                             fontWeight: 700,
-                            color: temperature > 0 ? '#f59e0b' : temperature < 0 ? '#38bdf8' : '#94a3b8',
+                            color:
+                              (adjustDestination === 'artwork' ? temperature : temperatureBg) > 0
+                                ? '#f59e0b'
+                                : (adjustDestination === 'artwork' ? temperature : temperatureBg) < 0
+                                ? '#38bdf8'
+                                : '#94a3b8',
                           }}
                         >
-                          {temperature}
+                          {adjustDestination === 'artwork' ? temperature : temperatureBg}
                         </span>
-                      </div>
-                      <input
-                        type="range"
-                        min="-50"
-                        max="50"
-                        value={temperature}
-                        onChange={(e) => setTemperature(parseInt(e.target.value))}
-                      />
-                    </div>
-
-                    <div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#ffffff', marginBottom: '2px' }}>
-                        <span>Matiz (Tint)</span>
-                        <span
-                          style={{
-                            fontWeight: 700,
-                            color: tint > 0 ? '#de2367' : tint < 0 ? '#10b981' : '#94a3b8',
-                          }}
-                        >
-                          {tint}
-                        </span>
-                      </div>
-                      <input
-                        type="range"
-                        min="-50"
-                        max="50"
-                        value={tint}
-                        onChange={(e) => setTint(parseInt(e.target.value))}
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                {/* 2. Iluminación */}
-                <div>
-                  <span
-                    style={{
-                      fontSize: '11px',
-                      fontWeight: 700,
-                      color: 'var(--accent-primary)',
-                      display: 'block',
-                      marginBottom: '6px',
-                    }}
-                  >
-                    ☀️ Iluminación
-                  </span>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    <div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#ffffff', marginBottom: '2px' }}>
-                        <span>Brillo</span>
-                        <span style={{ fontWeight: 700, color: 'var(--accent-primary)' }}>{brightness}</span>
-                      </div>
-                      <input
-                        type="range"
-                        min="-50"
-                        max="50"
-                        value={brightness}
-                        onChange={(e) => setBrightness(parseInt(e.target.value))}
-                      />
-                    </div>
-
-                    <div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#ffffff', marginBottom: '2px' }}>
-                        <span>Contraste</span>
-                        <span style={{ fontWeight: 700, color: 'var(--accent-primary)' }}>{contrast}</span>
-                      </div>
-                      <input
-                        type="range"
-                        min="-50"
-                        max="50"
-                        value={contrast}
-                        onChange={(e) => setContrast(parseInt(e.target.value))}
-                      />
-                    </div>
-
-                    <div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#ffffff', marginBottom: '2px' }}>
-                        <span>Luces (Highlights)</span>
-                        <span style={{ fontWeight: 700, color: 'var(--accent-primary)' }}>{highlights}</span>
-                      </div>
-                      <input
-                        type="range"
-                        min="-50"
-                        max="50"
-                        value={highlights}
-                        onChange={(e) => setHighlights(parseInt(e.target.value))}
-                      />
-                    </div>
-
-                    <div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#ffffff', marginBottom: '2px' }}>
-                        <span>Sombras</span>
-                        <span style={{ fontWeight: 700, color: 'var(--accent-primary)' }}>{shadowsTone}</span>
-                      </div>
-                      <input
-                        type="range"
-                        min="-50"
-                        max="50"
-                        value={shadowsTone}
-                        onChange={(e) => setShadowsTone(parseInt(e.target.value))}
-                      />
-                    </div>
-
-                    <div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#ffffff', marginBottom: '2px' }}>
-                        <span>Blancos</span>
-                        <span style={{ fontWeight: 700, color: 'var(--accent-primary)' }}>{whites}</span>
-                      </div>
-                      <input
-                        type="range"
-                        min="-50"
-                        max="50"
-                        value={whites}
-                        onChange={(e) => setWhites(parseInt(e.target.value))}
-                      />
-                    </div>
-
-                    <div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#ffffff', marginBottom: '2px' }}>
-                        <span>Negros</span>
-                        <span style={{ fontWeight: 700, color: 'var(--accent-primary)' }}>{blacks}</span>
-                      </div>
-                      <input
-                        type="range"
-                        min="-50"
-                        max="50"
-                        value={blacks}
-                        onChange={(e) => setBlacks(parseInt(e.target.value))}
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                {/* 3. Color */}
-                <div>
-                  <span
-                    style={{
-                      fontSize: '11px',
-                      fontWeight: 700,
-                      color: 'var(--accent-primary)',
-                      display: 'block',
-                      marginBottom: '6px',
-                    }}
-                  >
-                    🎨 Color
-                  </span>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    <div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#ffffff', marginBottom: '2px' }}>
-                        <span>Tono (Hue Rotate)</span>
-                        <span style={{ fontWeight: 700, color: 'var(--accent-primary)' }}>{hue}º</span>
-                      </div>
-                      <input
-                        type="range"
-                        min="-180"
-                        max="180"
-                        value={hue}
-                        onChange={(e) => setHue(parseInt(e.target.value))}
-                      />
-                    </div>
-
-                    <div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#ffffff', marginBottom: '2px' }}>
-                        <span>Saturación</span>
-                        <span style={{ fontWeight: 700, color: 'var(--accent-primary)' }}>{saturation}</span>
                       </div>
                       <input
                         type="range"
                         min="-100"
                         max="100"
-                        value={saturation}
-                        onChange={(e) => setSaturation(parseInt(e.target.value))}
+                        value={adjustDestination === 'artwork' ? temperature : temperatureBg}
+                        onChange={(e) => {
+                          const v = parseInt(e.target.value);
+                          if (adjustDestination === 'artwork') setTemperature(v);
+                          else setTemperatureBg(v);
+                        }}
+                      />
+                    </div>
+
+                    {/* Matiz / Tint */}
+                    <div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#ffffff', marginBottom: '2px' }}>
+                        <span>Tinte (Tint)</span>
+                        <span
+                          style={{
+                            fontWeight: 700,
+                            color:
+                              (adjustDestination === 'artwork' ? tint : tintBg) > 0
+                                ? '#de2367'
+                                : (adjustDestination === 'artwork' ? tint : tintBg) < 0
+                                ? '#10b981'
+                                : '#94a3b8',
+                          }}
+                        >
+                          {adjustDestination === 'artwork' ? tint : tintBg}
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        min="-100"
+                        max="100"
+                        value={adjustDestination === 'artwork' ? tint : tintBg}
+                        onChange={(e) => {
+                          const v = parseInt(e.target.value);
+                          if (adjustDestination === 'artwork') setTint(v);
+                          else setTintBg(v);
+                        }}
+                      />
+                    </div>
+
+                    {/* Saturación */}
+                    <div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#ffffff', marginBottom: '2px' }}>
+                        <span>Saturación</span>
+                        <span style={{ fontWeight: 700, color: 'var(--accent-primary)' }}>
+                          {adjustDestination === 'artwork' ? saturation : saturationBg}
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        min="-100"
+                        max="100"
+                        value={adjustDestination === 'artwork' ? saturation : saturationBg}
+                        onChange={(e) => {
+                          const v = parseInt(e.target.value);
+                          if (adjustDestination === 'artwork') setSaturation(v);
+                          else setSaturationBg(v);
+                        }}
+                      />
+                    </div>
+
+                    {/* Tono / Hue */}
+                    <div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#ffffff', marginBottom: '2px' }}>
+                        <span>Tono (Hue)</span>
+                        <span style={{ fontWeight: 700, color: 'var(--accent-primary)' }}>
+                          {adjustDestination === 'artwork' ? hue : hueBg}º
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        min="-180"
+                        max="180"
+                        value={adjustDestination === 'artwork' ? hue : hueBg}
+                        onChange={(e) => {
+                          const v = parseInt(e.target.value);
+                          if (adjustDestination === 'artwork') setHue(v);
+                          else setHueBg(v);
+                        }}
+                      />
+                    </div>
+
+                    {/* Viñeta */}
+                    <div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#ffffff', marginBottom: '2px' }}>
+                        <span>Viñeta</span>
+                        <span style={{ fontWeight: 700, color: 'var(--accent-primary)' }}>
+                          {adjustDestination === 'artwork' ? vignette : vignetteBg}%
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        value={adjustDestination === 'artwork' ? vignette : vignetteBg}
+                        onChange={(e) => {
+                          const v = parseInt(e.target.value);
+                          if (adjustDestination === 'artwork') setVignette(v);
+                          else setVignetteBg(v);
+                        }}
                       />
                     </div>
                   </div>
@@ -2859,22 +3809,39 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
 
                 <button
                   onClick={() => {
-                    setTemperature(0);
-                    setTint(0);
-                    setBrightness(0);
-                    setContrast(0);
-                    setHighlights(0);
-                    setShadowsTone(0);
-                    setWhites(0);
-                    setBlacks(0);
-                    setHue(0);
-                    setSaturation(0);
-                    setInvert(false);
+                    pushSnapshot();
+                    if (adjustDestination === 'artwork') {
+                      setTemperature(0);
+                      setTint(0);
+                      setBrightness(0);
+                      setContrast(0);
+                      setHighlights(0);
+                      setShadowsTone(0);
+                      setWhites(0);
+                      setBlacks(0);
+                      setHue(0);
+                      setSaturation(0);
+                      setVignette(0);
+                      setInvert(false);
+                    } else {
+                      setTemperatureBg(0);
+                      setTintBg(0);
+                      setBrightnessBg(0);
+                      setContrastBg(0);
+                      setHighlightsBg(0);
+                      setShadowsToneBg(0);
+                      setWhitesBg(0);
+                      setBlacksBg(0);
+                      setHueBg(0);
+                      setSaturationBg(0);
+                      setVignetteBg(0);
+                      setInvertBg(false);
+                    }
                   }}
                   style={{
-                    padding: '6px',
+                    padding: '7px',
                     borderRadius: '8px',
-                    fontSize: '10px',
+                    fontSize: '10.5px',
                     fontWeight: 600,
                     background: 'rgba(255,255,255,0.05)',
                     color: '#94a3b8',
@@ -2886,12 +3853,12 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                     gap: '4px',
                   }}
                 >
-                  <RotateCcw size={11} /> Resetear Todos los Ajustes
+                  <RotateCcw size={11} /> Resetear Ajustes de {adjustDestination === 'artwork' ? 'Cuadro' : 'Fondo'}
                 </button>
               </div>
             )}
 
-            {/* TAB 3: REFLECTION & WEATHER LIGHTING (SIMPLIFIED & CLEAN) */}
+            {/* TAB 3: REFLECTION & WEATHER LIGHTING (MULTI-LIGHT 3D SPHERES) */}
             {activeTab === 'lighting' && (
               <div
                 style={{
@@ -2903,6 +3870,160 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                   paddingRight: '2px',
                 }}
               >
+                {/* 0. Multi-Light 3D Spheres Manager */}
+                <div
+                  style={{
+                    background: 'rgba(255, 255, 255, 0.03)',
+                    padding: '12px 14px',
+                    borderRadius: '12px',
+                    border: '1px solid rgba(255, 255, 255, 0.08)',
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <Sun size={14} color="#f59e0b" />
+                      <span style={{ fontSize: '11px', fontWeight: 700, color: '#ffffff' }}>
+                        💡 Focos de Luz 3D
+                      </span>
+                    </div>
+                    <button
+                      onClick={handleAddLight}
+                      disabled={lightsList.length >= 4}
+                      style={{
+                        padding: '4px 8px',
+                        borderRadius: '6px',
+                        fontSize: '10px',
+                        fontWeight: 700,
+                        background: lightsList.length < 4 ? 'rgba(245, 158, 11, 0.2)' : 'rgba(255,255,255,0.04)',
+                        border: lightsList.length < 4 ? '1px solid #f59e0b' : '1px solid rgba(255,255,255,0.08)',
+                        color: lightsList.length < 4 ? '#fbbf24' : '#64748b',
+                        cursor: lightsList.length < 4 ? 'pointer' : 'not-allowed',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                      }}
+                    >
+                      <Plus size={11} />
+                      <span>Añadir Foco</span>
+                    </button>
+                  </div>
+
+                  {/* Light selector pills */}
+                  <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '10px' }}>
+                    {lightsList.map((light, idx) => {
+                      const isSel = light.id === activeLightId;
+                      return (
+                        <div
+                          key={light.id}
+                          onClick={() => setActiveLightId(light.id)}
+                          style={{
+                            padding: '4px 8px',
+                            borderRadius: '8px',
+                            fontSize: '10.5px',
+                            fontWeight: isSel ? 700 : 500,
+                            background: isSel ? 'rgba(245, 158, 11, 0.25)' : 'rgba(255, 255, 255, 0.04)',
+                            border: isSel ? '1.5px solid #f59e0b' : '1px solid rgba(255, 255, 255, 0.08)',
+                            color: isSel ? '#ffffff' : '#94a3b8',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                          }}
+                        >
+                          <Sun size={11} color={isSel ? '#fbbf24' : '#94a3b8'} />
+                          <span>{light.name || `Foco ${idx + 1}`}</span>
+                          {lightsList.length > 1 && (
+                            <button
+                              onClick={(e) => handleRemoveLight(light.id, e)}
+                              title="Eliminar este foco"
+                              style={{
+                                background: 'transparent',
+                                border: 'none',
+                                color: '#ef4444',
+                                cursor: 'pointer',
+                                padding: '0 2px',
+                                display: 'flex',
+                              }}
+                            >
+                              <Trash2 size={11} />
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Controls for selected light */}
+                  {selectedLight && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', paddingTop: '6px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+                      <div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10.5px', color: '#ffffff', marginBottom: '2px' }}>
+                          <span>☀️ Intensidad Lumínica ({selectedLight.name || 'Foco'})</span>
+                          <span style={{ fontWeight: 700, color: 'var(--accent-primary)' }}>
+                            {selectedLight.intensity ?? 100}%
+                          </span>
+                        </div>
+                        <input
+                          type="range"
+                          min="0"
+                          max="200"
+                          step="5"
+                          value={selectedLight.intensity ?? 100}
+                          onChange={(e) => {
+                            const v = parseInt(e.target.value);
+                            setLightsList((prev) =>
+                              prev.map((l) => (l.id === selectedLight.id ? { ...l, intensity: v } : l))
+                            );
+                            setSunIntensity(v);
+                          }}
+                        />
+                      </div>
+
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
+                        <div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '9.5px', color: '#94a3b8', marginBottom: '2px' }}>
+                            <span>Posición X</span>
+                            <span>{Math.round(selectedLight.x * 100)}%</span>
+                          </div>
+                          <input
+                            type="range"
+                            min="0.05"
+                            max="0.95"
+                            step="0.01"
+                            value={selectedLight.x}
+                            onChange={(e) => {
+                              const v = parseFloat(e.target.value);
+                              setLightsList((prev) =>
+                                prev.map((l) => (l.id === selectedLight.id ? { ...l, x: v } : l))
+                              );
+                            }}
+                          />
+                        </div>
+
+                        <div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '9.5px', color: '#94a3b8', marginBottom: '2px' }}>
+                            <span>Posición Y</span>
+                            <span>{Math.round(selectedLight.y * 100)}%</span>
+                          </div>
+                          <input
+                            type="range"
+                            min="0.05"
+                            max="0.95"
+                            step="0.01"
+                            value={selectedLight.y}
+                            onChange={(e) => {
+                              const v = parseFloat(e.target.value);
+                              setLightsList((prev) =>
+                                prev.map((l) => (l.id === selectedLight.id ? { ...l, y: v } : l))
+                              );
+                            }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
                 {/* 1. Selector de Acabado del Cuadro */}
                 <div
                   style={{
@@ -2925,7 +4046,10 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                       return (
                         <button
                           key={f.id}
-                          onClick={() => setFinishMode(f.id as any)}
+                          onClick={() => {
+                            pushSnapshot();
+                            setFinishMode(f.id as any);
+                          }}
                           style={{
                             padding: '6px 4px',
                             borderRadius: '8px',
@@ -2967,7 +4091,10 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                       return (
                         <button
                           key={opt.id}
-                          onClick={() => setReflectionType(opt.id)}
+                          onClick={() => {
+                            pushSnapshot();
+                            setReflectionType(opt.id);
+                          }}
                           title={opt.description}
                           style={{
                             padding: '6px 2px',
@@ -2997,35 +4124,7 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                   </div>
                 </div>
 
-                {/* 3. Intensidad Lumínica del Sol */}
-                <div
-                  style={{
-                    background: 'rgba(255, 255, 255, 0.03)',
-                    padding: '12px 14px',
-                    borderRadius: '12px',
-                    border: '1px solid rgba(255, 255, 255, 0.08)',
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#ffffff', marginBottom: '4px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <Sun size={13} color="#f59e0b" />
-                      <span style={{ fontWeight: 600 }}>☀️ Intensidad Lumínica del Sol</span>
-                    </div>
-                    <span style={{ fontWeight: 700, color: 'var(--accent-primary)' }}>
-                      {sunIntensity}%
-                    </span>
-                  </div>
-                  <input
-                    type="range"
-                    min="0"
-                    max="200"
-                    step="5"
-                    value={sunIntensity}
-                    onChange={(e) => setSunIntensity(parseInt(e.target.value))}
-                  />
-                </div>
-
-                {/* 4. Brillo de Reflejo */}
+                {/* 3. Brillo de Reflejo */}
                 <div
                   style={{
                     background: 'rgba(255, 255, 255, 0.03)',
@@ -3050,7 +4149,7 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                   />
                 </div>
 
-                {/* 5. Luminaria de Techo Industrial */}
+                {/* 4. Luminaria de Techo Industrial */}
                 <div
                   style={{
                     background: 'rgba(255, 255, 255, 0.03)',
@@ -3070,7 +4169,10 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                       </span>
                     </div>
                     <button
-                      onClick={() => setCeilingLightsEnabled(!ceilingLightsEnabled)}
+                      onClick={() => {
+                        pushSnapshot();
+                        setCeilingLightsEnabled(!ceilingLightsEnabled);
+                      }}
                       style={{
                         padding: '3px 10px',
                         borderRadius: '6px',
@@ -3098,7 +4200,10 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                         return (
                           <button
                             key={t.id}
-                            onClick={() => setCeilingLightTemp(t.id as any)}
+                            onClick={() => {
+                              pushSnapshot();
+                              setCeilingLightTemp(t.id as any);
+                            }}
                             style={{
                               padding: '6px 4px',
                               borderRadius: '8px',
@@ -3124,7 +4229,7 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                   )}
                 </div>
 
-                {/* 6. Tonalidad & Clima del Mockup */}
+                {/* 5. Tonalidad & Clima del Mockup */}
                 <div
                   style={{
                     background: 'rgba(255, 255, 255, 0.03)',
@@ -3151,7 +4256,10 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                       return (
                         <button
                           key={w.id}
-                          onClick={() => setWeatherPreset(w.id as WeatherPreset)}
+                          onClick={() => {
+                            pushSnapshot();
+                            setWeatherPreset(w.id as WeatherPreset);
+                          }}
                           style={{
                             padding: '6px 2px',
                             borderRadius: '6px',
@@ -3202,7 +4310,10 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                     return (
                       <button
                         key={opt.id}
-                        onClick={() => setShadowPreset(opt.id)}
+                        onClick={() => {
+                          pushSnapshot();
+                          setShadowPreset(opt.id);
+                        }}
                         style={{
                           padding: '8px 2px',
                           borderRadius: '8px',

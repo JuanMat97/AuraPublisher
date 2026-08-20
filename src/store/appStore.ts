@@ -62,17 +62,18 @@ export interface ProductConfigState {
   notes?: string;
 
   // Complete Canva Image Adjustment Suite
-  temperature: number; // -50..50 (default 0)
-  tint: number; // -50..50 (default 0)
-  brightness: number; // -50..50 (default 0)
-  contrast: number; // -50..50 (default 0)
-  highlights: number; // -50..50 (default 0)
-  shadowsTone: number; // -50..50 (default 0)
-  whites: number; // -50..50 (default 0)
-  blacks: number; // -50..50 (default 0)
+  temperature: number; // -100..100 (default 0)
+  tint: number; // -100..100 (default 0)
+  brightness: number; // -100..100 (default 0)
+  contrast: number; // -100..100 (default 0)
+  highlights: number; // -100..100 (default 0)
+  shadowsTone: number; // -100..100 (default 0)
+  whites: number; // -100..100 (default 0)
+  blacks: number; // -100..100 (default 0)
   hue: number; // -180..180 (default 0)
   saturation: number; // -100..100 (default 0)
   invert: boolean; // default false
+  vignette: number; // 0..100 (default 0)
   glassOverlay: boolean; // default true
 
   // Canva-Style Advanced Shadows
@@ -385,6 +386,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     hue: 0,
     saturation: 0,
     invert: false,
+    vignette: 0,
     glassOverlay: true,
 
     // Canva-Style Advanced Shadow Defaults
@@ -526,6 +528,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         hue: 0,
         saturation: 0,
         invert: false,
+        vignette: 0,
         glassOverlay: true,
         shadowPreset: 'parallel',
         shadowAngleDeg: 62,
