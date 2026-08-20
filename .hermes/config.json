@@ -1,0 +1,113 @@
+{
+  "agent": {
+    "name": "Hermes",
+    "version": "1.0.0",
+    "description": "Autonomous Catalog Ingestion and MercadoLibre Publishing Agent for AuraStudio & AuraPublisher",
+    "environment": "desktop-electron"
+  },
+  "catalog": {
+    "rootPath": "E:\\AuraStudio\\Cuadros",
+    "fallbackCache": "./src/engine/embeddedCatalogData.json",
+    "categories": [
+      "peliculas",
+      "series",
+      "anime",
+      "videojuegos",
+      "musica",
+      "arte",
+      "deportes",
+      "paisajes",
+      "ciudades"
+    ],
+    "qualityTiers": {
+      "excelente": { "minHeight": 2800, "recommendedFormats": ["all", "xl_100x70"] },
+      "buena": { "minHeight": 1800, "recommendedFormats": ["standard_50x70", "h_60x40"] },
+      "utilizable": { "minHeight": 1200, "recommendedFormats": ["small_25x25", "small_40x60"] },
+      "descartar": { "minHeight": 0, "recommendedFormats": [] }
+    }
+  },
+  "mercadolibre": {
+    "siteId": "MLA",
+    "categoryPath": "Hogar, Muebles y Jardín > Adornos y Decoración del Hogar > Cuadros, Carteles y Espejos > Cuadros Decorativos",
+    "sheetName": "Cuadros Decorativos",
+    "templatePath": "H:\\AuraStudio\\Publicar-08-13-09_35_15.xlsx",
+    "fallbackTemplatePath": "H:\\Projects\\AuraPublisher\\public\\templates\\Publicar-08-13-09_35_15.xlsx",
+    "titleRules": {
+      "maxCharacters": 60,
+      "brandFullName": "Aura Studio",
+      "brandShortName": "Aura St",
+      "degradationStages": 5
+    },
+    "defaults": {
+      "brand": "AuraStudio",
+      "condition": "Nuevo",
+      "universalCode": "El producto no tiene código registrado",
+      "saleFormat": "Unidad",
+      "packUnits": 1,
+      "shippingMethod": "Mercado Envíos",
+      "freeShippingThreshold": 30000,
+      "pickup": "Acepto",
+      "warrantyType": "Garantía del vendedor",
+      "warrantyDays": 30,
+      "manufacturingDays": 2,
+      "invoiceA": "No ofrezco",
+      "stock": 99,
+      "frameThicknessCm": 1.0,
+      "frameMaterial": "Madera",
+      "hasGlass": "No",
+      "hasPhrases": "No"
+    }
+  },
+  "renderer3d": {
+    "engine": "webgl-threejs",
+    "outputResolution": {
+      "width": 1920,
+      "height": 1920
+    },
+    "exportFormat": {
+      "type": "jpeg",
+      "quality": 92,
+      "progressive": true,
+      "chromaSubsampling": "4:4:4"
+    },
+    "pbrMaterials": {
+      "resina_epoxi": {
+        "roughness": 0.002,
+        "clearcoat": 1.0,
+        "clearcoatRoughness": 0.002,
+        "envMapIntensity": 6.0,
+        "specularIntensity": 3.0,
+        "colorBoost": 1.08
+      },
+      "vinilo_brillante": {
+        "roughness": 0.1,
+        "clearcoat": 0.88,
+        "clearcoatRoughness": 0.03,
+        "envMapIntensity": 2.2,
+        "specularIntensity": 1.9
+      },
+      "vinilo_mate": {
+        "roughness": 0.42,
+        "clearcoat": 0.3,
+        "clearcoatRoughness": 0.15,
+        "envMapIntensity": 0.9,
+        "specularIntensity": 0.9
+      },
+      "vinilo_tornasolado": {
+        "roughness": 0.15,
+        "clearcoat": 0.7,
+        "clearcoatRoughness": 0.06,
+        "iridescence": 1.0,
+        "iridescenceIOR": 1.45,
+        "envMapIntensity": 2.5,
+        "specularIntensity": 1.5
+      }
+    }
+  },
+  "skills": [
+    "mercadolibre-publishing",
+    "cuadros-library-pipeline",
+    "publisher-3d-engine",
+    "copywriting-persuasivo"
+  ]
+}
