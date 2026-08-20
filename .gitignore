@@ -1,8 +1,9 @@
-﻿# Node & Build Outputs
+# Node & Build Outputs
 node_modules/
 dist/
 dist-electron/
 release/
+portable/
 
 # Environment & Local Secrets
 .env
