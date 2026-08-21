@@ -1223,12 +1223,14 @@ export function renderWebGLRoomComposite(options: RenderWebGLRoomOptions): HTMLC
   const maxAniso = renderer.capabilities.getMaxAnisotropy ? renderer.capabilities.getMaxAnisotropy() : 16;
 
   const scene = new THREE.Scene();
-  const camera = new THREE.PerspectiveCamera(40, renderWidth / renderHeight, 0.1, 50);
-  camera.position.set(0, 0, 4.0);
-  const shiftX = (centerX - 0.5) * renderWidth;
-  const shiftY = (centerY - 0.5) * renderHeight;
-  camera.setViewOffset(renderWidth, renderHeight, shiftX, shiftY, renderWidth, renderHeight);
-  camera.updateProjectionMatrix();
+  const camAspect = renderWidth / renderHeight;
+  const persCamera = new THREE.PerspectiveCamera(40, camAspect, 0.1, 50);
+  persCamera.position.set(0, 0, 4.0);
+
+  const halfH = 4.0 * Math.tan((40 * Math.PI) / 360);
+  const halfW = halfH * camAspect;
+  const orthoCamera = new THREE.OrthographicCamera(-halfW, halfW, halfH, -halfH, 0.1, 50);
+  orthoCamera.position.set(0, 0, 4.0);
 
   // 1. Room Background Plane (with professional photo color grading support)
   const effectiveBgAdjust = bgAdjust || adjustBg;
@@ -1655,7 +1657,15 @@ export function renderWebGLRoomComposite(options: RenderWebGLRoomOptions): HTMLC
   shadowMesh.rotation.z = group.rotation.z;
   scene.add(shadowMesh);
 
-  renderer.render(scene, camera);
+  const isNearlyFlat = Math.abs(wallAngleDeg) <= 5 && Math.abs(clampedPitchDeg) <= 5;
+  if (!isNearlyFlat) {
+    persCamera.position.set(normX, normY, 4.0);
+    persCamera.lookAt(normX, normY, 0);
+    persCamera.updateProjectionMatrix();
+  }
+  const activeCamera = isNearlyFlat ? orthoCamera : persCamera;
+
+  renderer.render(scene, activeCamera);
   pmremGenerator.dispose();
   envRenderTarget.dispose();
   renderer.dispose();

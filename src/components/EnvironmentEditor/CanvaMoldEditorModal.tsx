@@ -191,17 +191,6 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
   // 3D Wall Perspective Grid Visibility (Disabled by default to keep photo clean)
   const [showWallGrid, setShowWallGrid] = useState<boolean>(false);
 
-  // 2 Vanishing Reference Guides (fSpy Style for smart horizontal/shelf alignment)
-  const [showVanishingGuides, setShowVanishingGuides] = useState<boolean>(false);
-  const [guideLineA, setGuideLineA] = useState<{ p1: { x: number; y: number }; p2: { x: number; y: number } }>({
-    p1: { x: 0.15, y: 0.68 },
-    p2: { x: 0.85, y: 0.68 },
-  });
-  const [guideLineB, setGuideLineB] = useState<{ p1: { x: number; y: number }; p2: { x: number; y: number } }>({
-    p1: { x: 0.15, y: 0.28 },
-    p2: { x: 0.85, y: 0.30 },
-  });
-
   // Multi-Light 3D Spheres Gizmo
   const [lightsList, setLightsList] = useState<LightSource3D[]>(() => {
     if (pos?.lightsList && pos.lightsList.length > 0) return pos.lightsList;
@@ -573,6 +562,8 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
     currentEnvRenderTarget: THREE.WebGLRenderTarget | null;
     scene: THREE.Scene | null;
     camera: THREE.PerspectiveCamera | null;
+    orthoCamera: THREE.OrthographicCamera | null;
+    activeCamera: THREE.Camera | null;
     artGroup: THREE.Group | null;
     artMeshes: THREE.Mesh[];
     shadowMesh: THREE.Mesh | null;
@@ -604,6 +595,8 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
     currentEnvRenderTarget: null,
     scene: null,
     camera: null,
+    orthoCamera: null,
+    activeCamera: null,
     artGroup: null,
     artMeshes: [],
     shadowMesh: null,
@@ -978,6 +971,11 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
         const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 50);
         camera.position.set(0, 0, 4.0);
 
+        const halfH = 4.0 * Math.tan((40 * Math.PI) / 360);
+        const halfW = halfH * 1.0;
+        const orthoCamera = new THREE.OrthographicCamera(-halfW, halfW, halfH, -halfH, 0.1, 50);
+        orthoCamera.position.set(0, 0, 4.0);
+
         // Room Background Plane with Proxy Canvas for Dual-Grading
         const roomProxyCanvas = document.createElement('canvas');
         const natEnvW = envImg.naturalWidth || envImg.width || 1920;
@@ -1245,6 +1243,8 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
           currentEnvRenderTarget: null,
           scene,
           camera,
+          orthoCamera,
+          activeCamera: orthoCamera,
           artGroup,
           artMeshes,
           shadowMesh,
@@ -1289,7 +1289,10 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
         );
 
         const renderLoop = () => {
-          renderer.render(scene, camera);
+          const activeCam = threeState.current.activeCamera || threeState.current.orthoCamera || threeState.current.camera;
+          if (activeCam && scene) {
+            renderer.render(scene, activeCam);
+          }
           threeState.current.animId = requestAnimationFrame(renderLoop);
         };
         renderLoop();
@@ -1313,14 +1316,8 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
 
   // 2. Dynamic 3D Transform & Sub-Pixel Vector Pin Projection (9 Pins)
   useEffect(() => {
-    const { artGroup, shadowMesh, wallGridMesh, camera, bgW, bgH, totalW, totalH } = threeState.current;
-    if (!artGroup || !shadowMesh || !camera) return;
-
-    // Architectural Camera Shift: shifts optical axis to eliminate keystone distortion at 0° frontal
-    const shiftX = (centerX - 0.5) * 660;
-    const shiftY = (centerY - 0.5) * 660;
-    camera.setViewOffset(660, 660, shiftX, shiftY, 660, 660);
-    camera.updateProjectionMatrix();
+    const { artGroup, shadowMesh, wallGridMesh, camera, orthoCamera, bgW, bgH, totalW, totalH } = threeState.current;
+    if (!artGroup || !shadowMesh || !camera || !orthoCamera) return;
 
     const normX = (centerX - 0.5) * bgW;
     const normY = -(centerY - 0.5) * bgH;
@@ -1336,6 +1333,19 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
       : isWallAnchored
       ? wallCalibratedPitch
       : pitchAngle;
+
+    // Hybrid Camera System: Orthographic at <=5° (100% straight & parallel), Perspective when rotated >5°
+    const isNearlyFlat = Math.abs(effectiveWallAngle) <= 5 && Math.abs(effectivePitch) <= 5;
+    if (isNearlyFlat) {
+      threeState.current.activeCamera = orthoCamera;
+    } else {
+      camera.position.set(normX, normY, 4.0);
+      camera.lookAt(normX, normY, 0);
+      camera.updateProjectionMatrix();
+      threeState.current.activeCamera = camera;
+    }
+
+    const activeCam = threeState.current.activeCamera || orthoCamera;
 
     // 3D Scene Mesh Position & 3-Axis Rotation with Physics Clamps (prevents wall penetration)
     const clampedZ = Math.max(0.01, 0.04 + Math.max(0, Math.min(8.0, zDistance)) / 100);
@@ -1388,7 +1398,7 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
 
     const projected = localCorners.map((pt) => {
       const worldPt = pt.clone().applyMatrix4(artGroup.matrixWorld);
-      const screenPt = worldPt.project(camera);
+      const screenPt = worldPt.project(activeCam);
       return {
         x: (screenPt.x * 0.5 + 0.5) * 100,
         y: (-(screenPt.y * 0.5) + 0.5) * 100,
@@ -1533,23 +1543,13 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
 
     let hitTarget: DragTarget = null;
 
-    // Check Vanishing Reference Guides if enabled
-    if (showVanishingGuides) {
-      if (Math.hypot(clickX - guideLineA.p1.x, clickY - guideLineA.p1.y) < 0.05) hitTarget = 'guideA_p1';
-      else if (Math.hypot(clickX - guideLineA.p2.x, clickY - guideLineA.p2.y) < 0.05) hitTarget = 'guideA_p2';
-      else if (Math.hypot(clickX - guideLineB.p1.x, clickY - guideLineB.p1.y) < 0.05) hitTarget = 'guideB_p1';
-      else if (Math.hypot(clickX - guideLineB.p2.x, clickY - guideLineB.p2.y) < 0.05) hitTarget = 'guideB_p2';
-    }
-
-    // Check Multi-Light Spheres if not hit guide
-    if (!hitTarget) {
-      for (const light of lightsList) {
-        const lightDist = Math.hypot(clickX * 100 - light.x * 100, clickY * 100 - light.y * 100);
-        if (lightDist < 7) {
-          hitTarget = `light_${light.id}`;
-          setActiveLightId(light.id);
-          break;
-        }
+    // Check Multi-Light Spheres
+    for (const light of lightsList) {
+      const lightDist = Math.hypot(clickX * 100 - light.x * 100, clickY * 100 - light.y * 100);
+      if (lightDist < 7) {
+        hitTarget = `light_${light.id}`;
+        setActiveLightId(light.id);
+        break;
       }
     }
 
@@ -1645,38 +1645,8 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
     const deltaY = curY - dragStart.current.y;
     const isCtrl = e.ctrlKey || e.metaKey || isCtrlActive;
 
-    // 1. Dragging Vanishing Reference Guide Points
-    if (dragTarget.startsWith('guideA_') || dragTarget.startsWith('guideB_')) {
-      const clampedX = Math.max(0.02, Math.min(0.98, curX));
-      const clampedY = Math.max(0.02, Math.min(0.98, curY));
-
-      const nextA = { ...guideLineA };
-      const nextB = { ...guideLineB };
-
-      if (dragTarget === 'guideA_p1') nextA.p1 = { x: clampedX, y: clampedY };
-      if (dragTarget === 'guideA_p2') nextA.p2 = { x: clampedX, y: clampedY };
-      if (dragTarget === 'guideB_p1') nextB.p1 = { x: clampedX, y: clampedY };
-      if (dragTarget === 'guideB_p2') nextB.p2 = { x: clampedX, y: clampedY };
-
-      setGuideLineA(nextA);
-      setGuideLineB(nextB);
-
-      // Auto calculate vanishing angle from convergence
-      const dxA = nextA.p2.x - nextA.p1.x || 0.0001;
-      const dyA = nextA.p2.y - nextA.p1.y;
-      const slopeA = dyA / dxA;
-
-      const dxB = nextB.p2.x - nextB.p1.x || 0.0001;
-      const dyB = nextB.p2.y - nextB.p1.y;
-      const slopeB = dyB / dxB;
-
-      const avgSlope = (slopeA + slopeB) / 2;
-      const calculatedAngle = Math.round(Math.atan(avgSlope) * (180 / Math.PI) * 1.5);
-      const clampedAngle = Math.max(-60, Math.min(60, calculatedAngle));
-      setWallAngle(clampedAngle);
-    }
-    // 2. Dragging Light Sphere Gizmo
-    else if (dragTarget.startsWith('light_')) {
+    // 1. Dragging Light Sphere Gizmo
+    if (dragTarget.startsWith('light_')) {
       const lightId = dragTarget.replace('light_', '');
       const newX = Math.max(0.05, Math.min(0.95, curX));
       const newY = Math.max(0.05, Math.min(0.95, curY));
@@ -2411,32 +2381,6 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                   pointerEvents: 'none',
                 }}
               >
-                {/* 2 Vanishing Reference Guides (fSpy Style for Smart Wall Alignment) */}
-                {showVanishingGuides && (
-                  <g>
-                    {/* Line A (Gold) */}
-                    <line
-                      x1={`${guideLineA.p1.x * 100}%`}
-                      y1={`${guideLineA.p1.y * 100}%`}
-                      x2={`${guideLineA.p2.x * 100}%`}
-                      y2={`${guideLineA.p2.y * 100}%`}
-                      stroke="#f59e0b"
-                      strokeWidth="2.5"
-                      strokeDasharray="6 4"
-                    />
-                    {/* Line B (Cyan) */}
-                    <line
-                      x1={`${guideLineB.p1.x * 100}%`}
-                      y1={`${guideLineB.p1.y * 100}%`}
-                      x2={`${guideLineB.p2.x * 100}%`}
-                      y2={`${guideLineB.p2.y * 100}%`}
-                      stroke="#06b6d4"
-                      strokeWidth="2.5"
-                      strokeDasharray="6 4"
-                    />
-                  </g>
-                )}
-
                 {/* Frame Artwork Quad Outline & Subtle Rays to All Light Spheres */}
                 {screenPins && (
                   <>
@@ -2468,49 +2412,6 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                   </>
                 )}
               </svg>
-
-              {/* 4 Draggable Vanishing Guide Handles (fSpy style) */}
-              {showVanishingGuides && (
-                <>
-                  {[
-                    { id: 'guideA_p1', label: 'Guía A - Extremo Izq', pt: guideLineA.p1, color: '#f59e0b' },
-                    { id: 'guideA_p2', label: 'Guía A - Extremo Der', pt: guideLineA.p2, color: '#f59e0b' },
-                    { id: 'guideB_p1', label: 'Guía B - Extremo Izq', pt: guideLineB.p1, color: '#06b6d4' },
-                    { id: 'guideB_p2', label: 'Guía B - Extremo Der', pt: guideLineB.p2, color: '#06b6d4' },
-                  ].map((pin) => (
-                    <div
-                      key={pin.id}
-                      title={pin.label}
-                      style={{
-                        position: 'absolute',
-                        left: `${pin.pt.x * 100}%`,
-                        top: `${pin.pt.y * 100}%`,
-                        transform: 'translate(-50%, -50%)',
-                        width: '18px',
-                        height: '18px',
-                        borderRadius: '50%',
-                        background: pin.color,
-                        border: '2.5px solid #ffffff',
-                        boxShadow: `0 0 12px ${pin.color}`,
-                        pointerEvents: 'none',
-                        zIndex: 35,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                      }}
-                    >
-                      <div
-                        style={{
-                          width: '6px',
-                          height: '6px',
-                          borderRadius: '50%',
-                          background: '#ffffff',
-                        }}
-                      />
-                    </div>
-                  ))}
-                </>
-              )}
 
               {/* Multi-Light 3D Spheres on Canvas */}
               {lightsList.map((light, index) => {
@@ -2871,48 +2772,48 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                   paddingRight: '2px',
                 }}
               >
-                {/* 0. Sección Guías de Fuga Ópticas (fSpy) y Alineación Inteligente */}
+                {/* 0. Sección Orientación y Perspectiva 3D */}
                 <div
                   style={{
-                    background: showVanishingGuides ? 'rgba(245, 158, 11, 0.10)' : 'rgba(255, 255, 255, 0.03)',
+                    background: 'rgba(255, 255, 255, 0.03)',
                     padding: '12px 14px',
                     borderRadius: '12px',
-                    border: showVanishingGuides ? '1.5px solid #f59e0b' : '1px solid rgba(255, 255, 255, 0.08)',
-                    transition: 'all 0.2s ease',
+                    border: '1px solid rgba(255, 255, 255, 0.08)',
                   }}
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <Compass size={15} color={showVanishingGuides ? '#f59e0b' : '#94a3b8'} />
+                      <RotateCcw size={15} color="#38bdf8" />
                       <div>
                         <span style={{ fontSize: '11px', fontWeight: 700, color: '#ffffff', display: 'block' }}>
-                          📐 Guías de Fuga de Perspectiva
+                          📐 Orientación y Perspectiva 3D
                         </span>
-                        <span style={{ fontSize: '9.5px', color: showVanishingGuides ? '#f59e0b' : '#94a3b8' }}>
-                          {showVanishingGuides ? 'Arrastrá las 2 líneas sobre la repisa/zócalo' : 'Alineación automática de pared'}
+                        <span style={{ fontSize: '9.5px', color: '#94a3b8' }}>
+                          {Math.abs(wallAngle) <= 5 && Math.abs(pitchAngle) <= 5 ? '📐 Frontal Recto (Modo Ortográfico)' : '🌐 Perspectiva 3D Activa'}
                         </span>
                       </div>
                     </div>
-                    <button
-                      onClick={() => setShowVanishingGuides(!showVanishingGuides)}
-                      style={{
-                        padding: '6px 12px',
-                        borderRadius: '8px',
-                        fontSize: '11px',
-                        fontWeight: 700,
-                        background: showVanishingGuides ? '#f59e0b' : 'rgba(245, 158, 11, 0.15)',
-                        border: '1px solid #f59e0b',
-                        color: showVanishingGuides ? '#040d1a' : '#f59e0b',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '6px',
-                        boxShadow: showVanishingGuides ? '0 0 12px rgba(245, 158, 11, 0.5)' : 'none',
-                        transition: 'all 0.15s ease',
-                      }}
-                    >
-                      <span>{showVanishingGuides ? '✓ Ocultar Guías' : '📐 Trazar Guías'}</span>
-                    </button>
+                    {(wallAngle !== 0 || pitchAngle !== 0) && (
+                      <button
+                        onClick={() => {
+                          pushSnapshot();
+                          setWallAngle(0);
+                          setPitchAngle(0);
+                        }}
+                        style={{
+                          padding: '4px 8px',
+                          borderRadius: '6px',
+                          fontSize: '10px',
+                          fontWeight: 600,
+                          background: 'rgba(56, 189, 248, 0.12)',
+                          border: '1px solid rgba(56, 189, 248, 0.3)',
+                          color: '#38bdf8',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        Resetear a 0°
+                      </button>
+                    )}
                   </div>
 
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', paddingTop: '8px', borderTop: '1px solid rgba(255, 255, 255, 0.08)' }}>
