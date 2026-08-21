@@ -44,6 +44,7 @@ import {
   Magnet,
   Image as ImageIcon,
   Home,
+  Compass,
 } from 'lucide-react';
 
 interface CanvaMoldEditorModalProps {
@@ -187,8 +188,19 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
     }
   );
 
-  // 3D Wall Perspective Grid Visibility
-  const [showWallGrid, setShowWallGrid] = useState<boolean>(true);
+  // 3D Wall Perspective Grid Visibility (Disabled by default to keep photo clean)
+  const [showWallGrid, setShowWallGrid] = useState<boolean>(false);
+
+  // 2 Vanishing Reference Guides (fSpy Style for smart horizontal/shelf alignment)
+  const [showVanishingGuides, setShowVanishingGuides] = useState<boolean>(false);
+  const [guideLineA, setGuideLineA] = useState<{ p1: { x: number; y: number }; p2: { x: number; y: number } }>({
+    p1: { x: 0.15, y: 0.68 },
+    p2: { x: 0.85, y: 0.68 },
+  });
+  const [guideLineB, setGuideLineB] = useState<{ p1: { x: number; y: number }; p2: { x: number; y: number } }>({
+    p1: { x: 0.15, y: 0.28 },
+    p2: { x: 0.85, y: 0.30 },
+  });
 
   // Multi-Light 3D Spheres Gizmo
   const [lightsList, setLightsList] = useState<LightSource3D[]>(() => {
@@ -1304,6 +1316,12 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
     const { artGroup, shadowMesh, wallGridMesh, camera, bgW, bgH, totalW, totalH } = threeState.current;
     if (!artGroup || !shadowMesh || !camera) return;
 
+    // Architectural Camera Shift: shifts optical axis to eliminate keystone distortion at 0° frontal
+    const shiftX = (centerX - 0.5) * 660;
+    const shiftY = (centerY - 0.5) * 660;
+    camera.setViewOffset(660, 660, shiftX, shiftY, 660, 660);
+    camera.updateProjectionMatrix();
+
     const normX = (centerX - 0.5) * bgW;
     const normY = -(centerY - 0.5) * bgH;
     const scaleFactor = scaleWidth / initialScale;
@@ -1515,20 +1533,15 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
 
     let hitTarget: DragTarget = null;
 
-    // Check Wall Quad Corner Pins if calibrating wall
-    if (isCalibratingWall) {
-      const distTL = Math.hypot(clickX - wallQuad.topLeft.x, clickY - wallQuad.topLeft.y);
-      const distTR = Math.hypot(clickX - wallQuad.topRight.x, clickY - wallQuad.topRight.y);
-      const distBR = Math.hypot(clickX - wallQuad.bottomRight.x, clickY - wallQuad.bottomRight.y);
-      const distBL = Math.hypot(clickX - wallQuad.bottomLeft.x, clickY - wallQuad.bottomLeft.y);
-
-      if (distTL < 0.08) hitTarget = 'wallPin_tl';
-      else if (distTR < 0.08) hitTarget = 'wallPin_tr';
-      else if (distBR < 0.08) hitTarget = 'wallPin_br';
-      else if (distBL < 0.08) hitTarget = 'wallPin_bl';
+    // Check Vanishing Reference Guides if enabled
+    if (showVanishingGuides) {
+      if (Math.hypot(clickX - guideLineA.p1.x, clickY - guideLineA.p1.y) < 0.05) hitTarget = 'guideA_p1';
+      else if (Math.hypot(clickX - guideLineA.p2.x, clickY - guideLineA.p2.y) < 0.05) hitTarget = 'guideA_p2';
+      else if (Math.hypot(clickX - guideLineB.p1.x, clickY - guideLineB.p1.y) < 0.05) hitTarget = 'guideB_p1';
+      else if (Math.hypot(clickX - guideLineB.p2.x, clickY - guideLineB.p2.y) < 0.05) hitTarget = 'guideB_p2';
     }
 
-    // Check Multi-Light Spheres if not hit wall pin
+    // Check Multi-Light Spheres if not hit guide
     if (!hitTarget) {
       for (const light of lightsList) {
         const lightDist = Math.hypot(clickX * 100 - light.x * 100, clickY * 100 - light.y * 100);
@@ -1632,34 +1645,35 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
     const deltaY = curY - dragStart.current.y;
     const isCtrl = e.ctrlKey || e.metaKey || isCtrlActive;
 
-    // 1. Dragging Wall Corner Pin
-    if (dragTarget.startsWith('wallPin_')) {
+    // 1. Dragging Vanishing Reference Guide Points
+    if (dragTarget.startsWith('guideA_') || dragTarget.startsWith('guideB_')) {
       const clampedX = Math.max(0.02, Math.min(0.98, curX));
       const clampedY = Math.max(0.02, Math.min(0.98, curY));
 
-      const nextQuad = { ...wallQuad };
-      if (dragTarget === 'wallPin_tl') nextQuad.topLeft = { x: clampedX, y: clampedY };
-      if (dragTarget === 'wallPin_tr') nextQuad.topRight = { x: clampedX, y: clampedY };
-      if (dragTarget === 'wallPin_br') nextQuad.bottomRight = { x: clampedX, y: clampedY };
-      if (dragTarget === 'wallPin_bl') nextQuad.bottomLeft = { x: clampedX, y: clampedY };
+      const nextA = { ...guideLineA };
+      const nextB = { ...guideLineB };
 
-      setWallQuad(nextQuad);
+      if (dragTarget === 'guideA_p1') nextA.p1 = { x: clampedX, y: clampedY };
+      if (dragTarget === 'guideA_p2') nextA.p2 = { x: clampedX, y: clampedY };
+      if (dragTarget === 'guideB_p1') nextB.p1 = { x: clampedX, y: clampedY };
+      if (dragTarget === 'guideB_p2') nextB.p2 = { x: clampedX, y: clampedY };
 
-      // Recalculate perspective slopes from quad
-      const topW = nextQuad.topRight.x - nextQuad.topLeft.x;
-      const botW = nextQuad.bottomRight.x - nextQuad.bottomLeft.x;
-      const leftH = nextQuad.bottomLeft.y - nextQuad.topLeft.y;
-      const rightH = nextQuad.bottomRight.y - nextQuad.topRight.y;
-      const avgH = Math.max(0.01, (rightH + leftH) / 2);
-      const avgW = Math.max(0.01, (topW + botW) / 2);
+      setGuideLineA(nextA);
+      setGuideLineB(nextB);
 
-      const calcAngle = Math.round(((rightH - leftH) / avgH) * 55);
-      const calcPitch = Math.round(((topW - botW) / avgW) * 55);
+      // Auto calculate vanishing angle from convergence
+      const dxA = nextA.p2.x - nextA.p1.x || 0.0001;
+      const dyA = nextA.p2.y - nextA.p1.y;
+      const slopeA = dyA / dxA;
 
-      setWallCalibratedAngle(Math.max(-60, Math.min(60, calcAngle)));
-      setWallCalibratedPitch(Math.max(-75, Math.min(75, calcPitch)));
-      setWallAngle(Math.max(-60, Math.min(60, calcAngle)));
-      setPitchAngle(Math.max(-75, Math.min(75, calcPitch)));
+      const dxB = nextB.p2.x - nextB.p1.x || 0.0001;
+      const dyB = nextB.p2.y - nextB.p1.y;
+      const slopeB = dyB / dxB;
+
+      const avgSlope = (slopeA + slopeB) / 2;
+      const calculatedAngle = Math.round(Math.atan(avgSlope) * (180 / Math.PI) * 1.5);
+      const clampedAngle = Math.max(-60, Math.min(60, calculatedAngle));
+      setWallAngle(clampedAngle);
     }
     // 2. Dragging Light Sphere Gizmo
     else if (dragTarget.startsWith('light_')) {
@@ -2397,58 +2411,29 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                   pointerEvents: 'none',
                 }}
               >
-                {/* Wall Calibration Converging Vanishing Grid Lines */}
-                {isCalibratingWall && (
+                {/* 2 Vanishing Reference Guides (fSpy Style for Smart Wall Alignment) */}
+                {showVanishingGuides && (
                   <g>
-                    {/* Perspective Quad Polygon */}
-                    <polygon
-                      points={`${wallQuad.topLeft.x * 100}%,${wallQuad.topLeft.y * 100}% ${wallQuad.topRight.x * 100}%,${wallQuad.topRight.y * 100}% ${wallQuad.bottomRight.x * 100}%,${wallQuad.bottomRight.y * 100}% ${wallQuad.bottomLeft.x * 100}%,${wallQuad.bottomLeft.y * 100}%`}
-                      fill="rgba(56, 189, 248, 0.08)"
-                      stroke="#38bdf8"
-                      strokeWidth="2"
+                    {/* Line A (Gold) */}
+                    <line
+                      x1={`${guideLineA.p1.x * 100}%`}
+                      y1={`${guideLineA.p1.y * 100}%`}
+                      x2={`${guideLineA.p2.x * 100}%`}
+                      y2={`${guideLineA.p2.y * 100}%`}
+                      stroke="#f59e0b"
+                      strokeWidth="2.5"
+                      strokeDasharray="6 4"
                     />
-
-                    {/* Vertical Converging Vanishing Lines */}
-                    {[0.15, 0.3, 0.45, 0.6, 0.75, 0.9].map((t, idx) => {
-                      const topX = wallQuad.topLeft.x + (wallQuad.topRight.x - wallQuad.topLeft.x) * t;
-                      const topY = wallQuad.topLeft.y + (wallQuad.topRight.y - wallQuad.topLeft.y) * t;
-                      const botX = wallQuad.bottomLeft.x + (wallQuad.bottomRight.x - wallQuad.bottomLeft.x) * t;
-                      const botY = wallQuad.bottomLeft.y + (wallQuad.bottomRight.y - wallQuad.bottomLeft.y) * t;
-                      return (
-                        <line
-                          key={`v-grid-${idx}`}
-                          x1={`${topX * 100}%`}
-                          y1={`${topY * 100}%`}
-                          x2={`${botX * 100}%`}
-                          y2={`${botY * 100}%`}
-                          stroke="#38bdf8"
-                          strokeWidth="1.2"
-                          strokeDasharray="4 3"
-                          opacity="0.75"
-                        />
-                      );
-                    })}
-
-                    {/* Horizontal Converging Vanishing Lines */}
-                    {[0.15, 0.3, 0.45, 0.6, 0.75, 0.9].map((t, idx) => {
-                      const leftX = wallQuad.topLeft.x + (wallQuad.bottomLeft.x - wallQuad.topLeft.x) * t;
-                      const leftY = wallQuad.topLeft.y + (wallQuad.bottomLeft.y - wallQuad.topLeft.y) * t;
-                      const rightX = wallQuad.topRight.x + (wallQuad.bottomRight.x - wallQuad.topRight.x) * t;
-                      const rightY = wallQuad.topRight.y + (wallQuad.bottomRight.y - wallQuad.topRight.y) * t;
-                      return (
-                        <line
-                          key={`h-grid-${idx}`}
-                          x1={`${leftX * 100}%`}
-                          y1={`${leftY * 100}%`}
-                          x2={`${rightX * 100}%`}
-                          y2={`${rightY * 100}%`}
-                          stroke="#38bdf8"
-                          strokeWidth="1.2"
-                          strokeDasharray="4 3"
-                          opacity="0.75"
-                        />
-                      );
-                    })}
+                    {/* Line B (Cyan) */}
+                    <line
+                      x1={`${guideLineB.p1.x * 100}%`}
+                      y1={`${guideLineB.p1.y * 100}%`}
+                      x2={`${guideLineB.p2.x * 100}%`}
+                      y2={`${guideLineB.p2.y * 100}%`}
+                      stroke="#06b6d4"
+                      strokeWidth="2.5"
+                      strokeDasharray="6 4"
+                    />
                   </g>
                 )}
 
@@ -2484,18 +2469,18 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                 )}
               </svg>
 
-              {/* 4 Draggable Wall Corner Cyan Pins (Visible when Calibrating Wall) */}
-              {isCalibratingWall && (
+              {/* 4 Draggable Vanishing Guide Handles (fSpy style) */}
+              {showVanishingGuides && (
                 <>
                   {[
-                    { id: 'wallPin_tl', label: 'Superior Izq', pt: wallQuad.topLeft },
-                    { id: 'wallPin_tr', label: 'Superior Der', pt: wallQuad.topRight },
-                    { id: 'wallPin_br', label: 'Inferior Der', pt: wallQuad.bottomRight },
-                    { id: 'wallPin_bl', label: 'Inferior Izq', pt: wallQuad.bottomLeft },
+                    { id: 'guideA_p1', label: 'Guía A - Extremo Izq', pt: guideLineA.p1, color: '#f59e0b' },
+                    { id: 'guideA_p2', label: 'Guía A - Extremo Der', pt: guideLineA.p2, color: '#f59e0b' },
+                    { id: 'guideB_p1', label: 'Guía B - Extremo Izq', pt: guideLineB.p1, color: '#06b6d4' },
+                    { id: 'guideB_p2', label: 'Guía B - Extremo Der', pt: guideLineB.p2, color: '#06b6d4' },
                   ].map((pin) => (
                     <div
                       key={pin.id}
-                      title={`Esquina de Pared: ${pin.label} (Arrastra para calibrar perspectiva real)`}
+                      title={pin.label}
                       style={{
                         position: 'absolute',
                         left: `${pin.pt.x * 100}%`,
@@ -2504,9 +2489,9 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                         width: '18px',
                         height: '18px',
                         borderRadius: '50%',
-                        background: '#0284c7',
+                        background: pin.color,
                         border: '2.5px solid #ffffff',
-                        boxShadow: '0 0 14px #38bdf8, 0 0 4px #ffffff',
+                        boxShadow: `0 0 12px ${pin.color}`,
                         pointerEvents: 'none',
                         zIndex: 35,
                         display: 'flex',
@@ -2886,120 +2871,87 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                   paddingRight: '2px',
                 }}
               >
-                {/* 0. Sección Calibración de Plano de Pared con Grilla 3D & Anclaje */}
+                {/* 0. Sección Guías de Fuga Ópticas (fSpy) y Alineación Inteligente */}
                 <div
                   style={{
-                    background: isCalibratingWall ? 'rgba(56, 189, 248, 0.10)' : 'rgba(255, 255, 255, 0.03)',
+                    background: showVanishingGuides ? 'rgba(245, 158, 11, 0.10)' : 'rgba(255, 255, 255, 0.03)',
                     padding: '12px 14px',
                     borderRadius: '12px',
-                    border: isCalibratingWall ? '1.5px solid #38bdf8' : '1px solid rgba(255, 255, 255, 0.08)',
+                    border: showVanishingGuides ? '1.5px solid #f59e0b' : '1px solid rgba(255, 255, 255, 0.08)',
                     transition: 'all 0.2s ease',
                   }}
                 >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <Grid size={15} color={isCalibratingWall ? '#38bdf8' : '#94a3b8'} />
+                      <Compass size={15} color={showVanishingGuides ? '#f59e0b' : '#94a3b8'} />
                       <div>
                         <span style={{ fontSize: '11px', fontWeight: 700, color: '#ffffff', display: 'block' }}>
-                          📐 Calibración de Plano de Pared
+                          📐 Guías de Fuga de Perspectiva
                         </span>
-                        <span style={{ fontSize: '9.5px', color: isWallAnchored && !isCalibratingWall ? '#4ade80' : '#94a3b8' }}>
-                          {isCalibratingWall
-                            ? 'Ajustando perspectiva 3D con 4 pines'
-                            : isWallAnchored
-                            ? '🔒 Pared Anclada (Orientación fija)'
-                            : '🔓 Pared libre'}
+                        <span style={{ fontSize: '9.5px', color: showVanishingGuides ? '#f59e0b' : '#94a3b8' }}>
+                          {showVanishingGuides ? 'Arrastrá las 2 líneas sobre la repisa/zócalo' : 'Alineación automática de pared'}
                         </span>
                       </div>
                     </div>
                     <button
-                      onClick={handleToggleWallCalibration}
+                      onClick={() => setShowVanishingGuides(!showVanishingGuides)}
                       style={{
                         padding: '6px 12px',
                         borderRadius: '8px',
                         fontSize: '11px',
                         fontWeight: 700,
-                        background: isCalibratingWall ? '#38bdf8' : 'rgba(56, 189, 248, 0.15)',
-                        border: '1px solid #38bdf8',
-                        color: isCalibratingWall ? '#040d1a' : '#38bdf8',
+                        background: showVanishingGuides ? '#f59e0b' : 'rgba(245, 158, 11, 0.15)',
+                        border: '1px solid #f59e0b',
+                        color: showVanishingGuides ? '#040d1a' : '#f59e0b',
                         cursor: 'pointer',
                         display: 'flex',
                         alignItems: 'center',
                         gap: '6px',
-                        boxShadow: isCalibratingWall ? '0 0 12px rgba(56, 189, 248, 0.5)' : 'none',
+                        boxShadow: showVanishingGuides ? '0 0 12px rgba(245, 158, 11, 0.5)' : 'none',
                         transition: 'all 0.15s ease',
                       }}
                     >
-                      <span>{isCalibratingWall ? '🔒 Fijar y Anclar Pared' : '📐 Calibrar Plano de Pared'}</span>
+                      <span>{showVanishingGuides ? '✓ Ocultar Guías' : '📐 Trazar Guías'}</span>
                     </button>
                   </div>
 
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: isCalibratingWall ? '10px' : '0' }}>
-                    <span style={{ fontSize: '10px', color: '#94a3b8' }}>
-                      {isCalibratingWall
-                        ? 'Arrastra los 4 pines cian para hacer coincidir las líneas de fuga reales de la pared'
-                        : 'Desliza el cuadro libremente sobre la pared calibrada'}
-                    </span>
-                    <button
-                      onClick={() => setShowWallGrid(!showWallGrid)}
-                      style={{
-                        padding: '3px 8px',
-                        borderRadius: '5px',
-                        fontSize: '9.5px',
-                        fontWeight: 600,
-                        background: showWallGrid ? 'rgba(56, 189, 248, 0.2)' : 'rgba(255, 255, 255, 0.05)',
-                        border: '1px solid rgba(255, 255, 255, 0.08)',
-                        color: showWallGrid ? '#38bdf8' : '#94a3b8',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      Grilla: {showWallGrid ? 'ON' : 'OFF'}
-                    </button>
-                  </div>
-
-                  {isCalibratingWall && (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', paddingTop: '8px', borderTop: '1px solid rgba(56, 189, 248, 0.2)' }}>
-                      <div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10.5px', color: '#ffffff', marginBottom: '2px' }}>
-                          <span>Ángulo Horizontal de Pared (Yaw)</span>
-                          <span style={{ fontWeight: 700, color: '#38bdf8' }}>{wallCalibratedAngle > 0 ? `+${wallCalibratedAngle}°` : `${wallCalibratedAngle}°`}</span>
-                        </div>
-                        <input
-                          type="range"
-                          min="-60"
-                          max="60"
-                          step="1"
-                          value={wallCalibratedAngle}
-                          onChange={(e) => {
-                            pushSnapshot();
-                            const v = parseInt(e.target.value);
-                            setWallCalibratedAngle(v);
-                            setWallAngle(v);
-                          }}
-                        />
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', paddingTop: '8px', borderTop: '1px solid rgba(255, 255, 255, 0.08)' }}>
+                    <div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10.5px', color: '#ffffff', marginBottom: '2px' }}>
+                        <span>Ángulo de Pared (Yaw)</span>
+                        <span style={{ fontWeight: 700, color: '#38bdf8' }}>{wallAngle > 0 ? `+${wallAngle}°` : `${wallAngle}°`}</span>
                       </div>
-
-                      <div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10.5px', color: '#ffffff', marginBottom: '2px' }}>
-                          <span>Inclinación Vertical de Pared (Pitch)</span>
-                          <span style={{ fontWeight: 700, color: '#38bdf8' }}>{wallCalibratedPitch > 0 ? `+${wallCalibratedPitch}°` : `${wallCalibratedPitch}°`}</span>
-                        </div>
-                        <input
-                          type="range"
-                          min="-75"
-                          max="75"
-                          step="1"
-                          value={wallCalibratedPitch}
-                          onChange={(e) => {
-                            pushSnapshot();
-                            const v = parseInt(e.target.value);
-                            setWallCalibratedPitch(v);
-                            setPitchAngle(v);
-                          }}
-                        />
-                      </div>
+                      <input
+                        type="range"
+                        min="-60"
+                        max="60"
+                        step="1"
+                        value={wallAngle}
+                        onChange={(e) => {
+                          pushSnapshot();
+                          setWallAngle(parseInt(e.target.value));
+                        }}
+                      />
                     </div>
-                  )}
+
+                    <div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10.5px', color: '#ffffff', marginBottom: '2px' }}>
+                        <span>Inclinación Vertical (Pitch)</span>
+                        <span style={{ fontWeight: 700, color: '#38bdf8' }}>{pitchAngle > 0 ? `+${pitchAngle}°` : `${pitchAngle}°`}</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="-45"
+                        max="45"
+                        step="1"
+                        value={pitchAngle}
+                        onChange={(e) => {
+                          pushSnapshot();
+                          setPitchAngle(parseInt(e.target.value));
+                        }}
+                      />
+                    </div>
+                  </div>
                 </div>
 
                 {/* 1. Modo de Colocación (Pared vs Repisa) */}

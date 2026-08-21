@@ -485,66 +485,32 @@ export function drawExactFrameShadowToContext(
     c.fill();
   };
 
-  // 1. High-Density Contact Occlusion Line when touching or close to wall
-  if (zFactor < 2.0 && normIntensity > 0.05) {
-    const contactAlpha = (1.0 - zFactor / 2.0) * normIntensity * 0.90;
+  // 1. Ambient Occlusion (AO) Contact Perimeter Shadow directly under the frame
+  if (normIntensity > 0.05) {
+    const contactAlpha = Math.min(0.85, normIntensity * 0.75 * (1.0 / (1.0 + zFactor * 0.3)));
     ctx.save();
-    ctx.filter = getBlurFilter(Math.max(1.5, 4.0 * (1.0 - normBlur * 0.5)));
+    ctx.filter = getBlurFilter(Math.max(2, 6 * (1.0 - normBlur * 0.4)));
     ctx.fillStyle = `rgba(0, 0, 0, ${contactAlpha})`;
     drawQuad(
       ctx,
-      centerX - topHalfW + dropX * 0.1,
-      centerY - halfProjH + dropY * 0.1,
-      centerX + topHalfW + dropX * 0.1,
-      centerY - halfProjH + dropY * 0.1,
-      centerX + botHalfW + dropX * 0.1,
-      centerY + halfProjH + dropY * 0.1,
-      centerX - botHalfW + dropX * 0.1,
-      centerY + halfProjH + dropY * 0.1
+      centerX - topHalfW,
+      centerY - halfProjH,
+      centerX + topHalfW,
+      centerY - halfProjH,
+      centerX + botHalfW,
+      centerY + halfProjH,
+      centerX - botHalfW,
+      centerY + halfProjH
     );
     ctx.restore();
   }
 
-  // 2. Main Directional Soft Cast Shadow
+  // 2. Main Directional Soft Cast Penumbra Shadow
   ctx.save();
-  ctx.filter = getBlurFilter(blurPx);
-  ctx.fillStyle = `rgba(0, 0, 0, ${alpha})`;
+  ctx.filter = getBlurFilter(Math.max(4, blurPx));
+  ctx.fillStyle = `rgba(0, 0, 0, ${alpha * 0.85})`;
 
-  if (shadowPreset === 'parallel') {
-    drawQuad(ctx, tl_x, tl_y, tr_x, tr_y, br_x, br_y, bl_x, bl_y);
-  } else if (shadowPreset === 'glow') {
-    const pad = normDistance * 45 + 10;
-    drawQuad(
-      ctx,
-      tl_x - pad, tl_y - pad,
-      tr_x + pad, tr_y - pad,
-      br_x + pad, br_y + pad,
-      bl_x - pad, bl_y + pad
-    );
-  } else if (shadowPreset === 'outline') {
-    ctx.lineWidth = 12 + normDistance * 24;
-    ctx.strokeStyle = `rgba(0, 0, 0, ${alpha})`;
-    ctx.beginPath();
-    ctx.moveTo(tl_x, tl_y);
-    ctx.lineTo(tr_x, tr_y);
-    ctx.lineTo(br_x, br_y);
-    ctx.lineTo(bl_x, bl_y);
-    ctx.closePath();
-    ctx.stroke();
-  } else if (shadowPreset === 'curved') {
-    ctx.beginPath();
-    ctx.moveTo(tl_x, tl_y);
-    ctx.lineTo(tr_x, tr_y);
-    ctx.lineTo(br_x, br_y);
-    ctx.quadraticCurveTo(
-      centerX + dropX,
-      br_y + Math.max(12, Math.abs(dropY) * 1.6),
-      bl_x,
-      bl_y
-    );
-    ctx.closePath();
-    ctx.fill();
-  } else if (shadowPreset === 'floating') {
+  if (shadowPreset === 'floating') {
     const floatCenterY = br_y + Math.max(8, dropY * 0.6);
     const floatGrad = ctx.createRadialGradient(
       centerX + dropX, floatCenterY, 6,
@@ -560,41 +526,25 @@ export function drawExactFrameShadowToContext(
       frameW * 1.8,
       Math.max(40, Math.abs(dropY) * 2 + 85)
     );
-  } else if (shadowPreset === 'angled') {
-    ctx.beginPath();
-    ctx.moveTo(frameX, frameY);
-    ctx.lineTo(frameX + frameW, frameY);
-    ctx.lineTo(br_x + dropX * 0.8, br_y + dropY * 0.8);
-    ctx.lineTo(bl_x + dropX * 0.8, bl_y + dropY * 0.8);
-    ctx.closePath();
-    ctx.fill();
-  } else if (shadowPreset === 'bottom_drop') {
-    drawQuad(
-      ctx,
-      frameX, frameY + dropY,
-      frameX + frameW, frameY + dropY,
-      br_x, br_y,
-      bl_x, bl_y
-    );
   } else {
-    // Default perspective cast shadow
+    // Default smooth perspective cast shadow
     drawQuad(ctx, tl_x, tl_y, tr_x, tr_y, br_x, br_y, bl_x, bl_y);
   }
 
   ctx.restore();
 
-  // Shelf contact ambient occlusion: grounds the frame directly on top of the wooden shelf/surface
+  // 3. Shelf contact ambient occlusion: grounds the frame directly on top of the wooden shelf/surface
   if (shelfContactShadow || zFactor < 0.8) {
     ctx.save();
     ctx.filter = 'none';
     const bottomW = Math.max(10, br_x - bl_x);
-    const contactH = Math.max(6, Math.min(16, 6 + normIntensity * 8));
+    const contactH = Math.max(6, Math.min(18, 8 + normIntensity * 10));
 
-    // 1. Soft Ambient Occlusion penumbra under bottom edge onto shelf
+    // Soft Ambient Occlusion penumbra under bottom edge onto shelf
     const contactGrad = ctx.createLinearGradient(0, br_y - 2, 0, br_y + contactH);
     contactGrad.addColorStop(0, `rgba(0, 0, 0, ${Math.min(0.95, normIntensity * 1.15)})`);
-    contactGrad.addColorStop(0.3, `rgba(0, 0, 0, ${Math.min(0.65, normIntensity * 0.70)})`);
-    contactGrad.addColorStop(0.7, `rgba(0, 0, 0, ${Math.min(0.25, normIntensity * 0.30)})`);
+    contactGrad.addColorStop(0.35, `rgba(0, 0, 0, ${Math.min(0.65, normIntensity * 0.65)})`);
+    contactGrad.addColorStop(0.75, `rgba(0, 0, 0, ${Math.min(0.20, normIntensity * 0.25)})`);
     contactGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
 
     ctx.fillStyle = contactGrad;
@@ -610,7 +560,7 @@ export function drawExactFrameShadowToContext(
     );
     ctx.fill();
 
-    // 2. Razor-sharp 1.5px baseline occlusion line directly touching the wood
+    // Razor-sharp 1.5px baseline occlusion line directly touching the wood
     ctx.fillStyle = `rgba(0, 0, 0, ${Math.min(1.0, normIntensity * 1.3)})`;
     ctx.fillRect(bl_x + 1, br_y - 1, bottomW - 2, 2);
 
@@ -1275,6 +1225,10 @@ export function renderWebGLRoomComposite(options: RenderWebGLRoomOptions): HTMLC
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(40, renderWidth / renderHeight, 0.1, 50);
   camera.position.set(0, 0, 4.0);
+  const shiftX = (centerX - 0.5) * renderWidth;
+  const shiftY = (centerY - 0.5) * renderHeight;
+  camera.setViewOffset(renderWidth, renderHeight, shiftX, shiftY, renderWidth, renderHeight);
+  camera.updateProjectionMatrix();
 
   // 1. Room Background Plane (with professional photo color grading support)
   const effectiveBgAdjust = bgAdjust || adjustBg;
