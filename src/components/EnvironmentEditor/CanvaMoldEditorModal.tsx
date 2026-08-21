@@ -82,10 +82,6 @@ interface EditorSnapshot {
   thicknessCm: number;
   zDistance: number;
   placementMode: 'wall' | 'shelf';
-  isWallAnchored: boolean;
-  wallCalibratedAngle: number;
-  wallCalibratedPitch: number;
-  wallQuad: PerspectiveQuad;
   lightsList: LightSource3D[];
   activeLightId: string;
   isSnappingEnabled: boolean;
@@ -167,29 +163,6 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
   const [rollAngle, setRollAngle] = useState(pos?.rollDeg ?? pos?.rollAngle ?? 0);
   const [thicknessCm, setThicknessCm] = useState(pos?.thicknessCm ?? 1.0);
   const [zDistance, setZDistance] = useState(pos?.zDistance ?? 0);
-
-  // Independent 3D Wall Grid Calibration & Anchoring
-  const [isCalibratingWall, setIsCalibratingWall] = useState<boolean>(false);
-  const [isWallAnchored, setIsWallAnchored] = useState<boolean>(pos?.isWallAnchored ?? true);
-  const [wallCalibratedAngle, setWallCalibratedAngle] = useState<number>(
-    pos?.wallCalibratedAngle ?? pos?.wallAngle ?? 0
-  );
-  const [wallCalibratedPitch, setWallCalibratedPitch] = useState<number>(
-    pos?.wallCalibratedPitch ?? pos?.pitchDeg ?? 0
-  );
-
-  // Wall Perspective Quad (4 Corner Wall Pins)
-  const [wallQuad, setWallQuad] = useState<PerspectiveQuad>(
-    pos?.wallQuad ?? {
-      topLeft: { x: 0.1, y: 0.1 },
-      topRight: { x: 0.9, y: 0.1 },
-      bottomRight: { x: 0.9, y: 0.9 },
-      bottomLeft: { x: 0.1, y: 0.9 },
-    }
-  );
-
-  // 3D Wall Perspective Grid Visibility (Disabled by default to keep photo clean)
-  const [showWallGrid, setShowWallGrid] = useState<boolean>(false);
 
   // Multi-Light 3D Spheres Gizmo
   const [lightsList, setLightsList] = useState<LightSource3D[]>(() => {
@@ -313,10 +286,6 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
       thicknessCm,
       zDistance,
       placementMode,
-      isWallAnchored,
-      wallCalibratedAngle,
-      wallCalibratedPitch,
-      wallQuad: JSON.parse(JSON.stringify(wallQuad)),
       lightsList: JSON.parse(JSON.stringify(lightsList)),
       activeLightId,
       isSnappingEnabled,
@@ -377,10 +346,6 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
     thicknessCm,
     zDistance,
     placementMode,
-    isWallAnchored,
-    wallCalibratedAngle,
-    wallCalibratedPitch,
-    wallQuad,
     lightsList,
     activeLightId,
     isSnappingEnabled,
@@ -451,10 +416,6 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
     setThicknessCm(snap.thicknessCm);
     setZDistance(snap.zDistance);
     setPlacementMode(snap.placementMode);
-    setIsWallAnchored(snap.isWallAnchored);
-    setWallCalibratedAngle(snap.wallCalibratedAngle);
-    setWallCalibratedPitch(snap.wallCalibratedPitch);
-    setWallQuad(snap.wallQuad);
     setLightsList(snap.lightsList);
     setActiveLightId(snap.activeLightId);
     setIsSnappingEnabled(snap.isSnappingEnabled);
@@ -536,7 +497,6 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
     origAngle: 0,
     origPitch: 0,
     origRoll: 0,
-    origQuad: { ...wallQuad },
   });
 
   // On-Screen Vector Pin Coordinates (9 Pins: 4 Corners + 4 Midpoints + Center)
@@ -1212,28 +1172,6 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
         const shadowMesh = new THREE.Mesh(new THREE.PlaneGeometry(totalW * 1.80, totalH * 1.80), shadowMat);
         scene.add(shadowMesh);
 
-        // 3D Wall Perspective Wireframe Grid
-        const gridSize = 4.0;
-        const gridDivisions = 16;
-        const step = gridSize / gridDivisions;
-        const half = gridSize / 2;
-        const linePoints: THREE.Vector3[] = [];
-        for (let i = -half; i <= half + 0.0001; i += step) {
-          linePoints.push(new THREE.Vector3(-half, i, 0), new THREE.Vector3(half, i, 0));
-          linePoints.push(new THREE.Vector3(i, -half, 0), new THREE.Vector3(i, half, 0));
-        }
-        const gridGeom = new THREE.BufferGeometry().setFromPoints(linePoints);
-        const gridMat = new THREE.LineBasicMaterial({
-          color: 0x38bdf8,
-          transparent: true,
-          opacity: 0.25,
-          depthWrite: false,
-        });
-        const wallGridMesh = new THREE.LineSegments(gridGeom, gridMat);
-        wallGridMesh.position.set(0, 0, 0.002);
-        wallGridMesh.visible = showWallGrid;
-        scene.add(wallGridMesh);
-
         const sample = sampleWallLighting(envImg, initialCenterX, initialCenterY, initialScale);
         setWallSample(sample);
 
@@ -1248,7 +1186,7 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
           artGroup,
           artMeshes,
           shadowMesh,
-          wallGridMesh,
+          wallGridMesh: null,
           shadowCanvas,
           shadowTexture,
           frontMaterials,
@@ -1323,19 +1261,8 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
     const normY = -(centerY - 0.5) * bgH;
     const scaleFactor = scaleWidth / initialScale;
 
-    const effectiveWallAngle = isCalibratingWall
-      ? wallCalibratedAngle
-      : isWallAnchored
-      ? wallCalibratedAngle
-      : wallAngle;
-    const effectivePitch = isCalibratingWall
-      ? wallCalibratedPitch
-      : isWallAnchored
-      ? wallCalibratedPitch
-      : pitchAngle;
-
     // Hybrid Camera System: Orthographic at <=5° (100% straight & parallel), Perspective when rotated >5°
-    const isNearlyFlat = Math.abs(effectiveWallAngle) <= 5 && Math.abs(effectivePitch) <= 5;
+    const isNearlyFlat = Math.abs(wallAngle) <= 5 && Math.abs(pitchAngle) <= 5;
     if (isNearlyFlat) {
       threeState.current.activeCamera = orthoCamera;
     } else {
@@ -1347,37 +1274,23 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
 
     const activeCam = threeState.current.activeCamera || orthoCamera;
 
-    // 3D Scene Mesh Position & 3-Axis Rotation with Physics Clamps (prevents wall penetration)
+    // 3D Scene Mesh Position & 3-Axis Rotation with Physics Clamps
     const clampedZ = Math.max(0.01, 0.04 + Math.max(0, Math.min(8.0, zDistance)) / 100);
     artGroup.position.set(normX, normY, clampedZ);
     artGroup.scale.set(scaleFactor, scaleFactor, 1);
     artGroup.rotation.set(
-      -(effectivePitch * Math.PI) / 180,
-      (effectiveWallAngle * Math.PI) / 180,
+      -(pitchAngle * Math.PI) / 180,
+      (wallAngle * Math.PI) / 180,
       (rollAngle * Math.PI) / 180
     );
 
     shadowMesh.position.set(normX, normY, 0.01);
     shadowMesh.scale.set(scaleFactor, scaleFactor, 1);
     shadowMesh.rotation.set(
-      -(effectivePitch * Math.PI) / 180,
-      (effectiveWallAngle * Math.PI) / 180,
+      -(pitchAngle * Math.PI) / 180,
+      (wallAngle * Math.PI) / 180,
       (rollAngle * Math.PI) / 180
     );
-
-    if (wallGridMesh) {
-      wallGridMesh.position.set(normX, normY, 0.002);
-      wallGridMesh.rotation.set(
-        -(effectivePitch * Math.PI) / 180,
-        (effectiveWallAngle * Math.PI) / 180,
-        (rollAngle * Math.PI) / 180
-      );
-      wallGridMesh.visible = isCalibratingWall || showWallGrid;
-      if (wallGridMesh.material && 'opacity' in wallGridMesh.material) {
-        (wallGridMesh.material as THREE.LineBasicMaterial).opacity = isCalibratingWall ? 0.85 : 0.22;
-        (wallGridMesh.material as THREE.LineBasicMaterial).needsUpdate = true;
-      }
-    }
 
     artGroup.updateMatrixWorld(true);
 
@@ -1425,11 +1338,6 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
     rollAngle,
     zDistance,
     initialScale,
-    showWallGrid,
-    isCalibratingWall,
-    isWallAnchored,
-    wallCalibratedAngle,
-    wallCalibratedPitch,
   ]);
 
   // Live Sync 3D KeyLight Position & Active Light Intensity
@@ -1588,12 +1496,6 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
       origAngle: wallAngle,
       origPitch: pitchAngle,
       origRoll: rollAngle,
-      origQuad: {
-        topLeft: { ...wallQuad.topLeft },
-        topRight: { ...wallQuad.topRight },
-        bottomRight: { ...wallQuad.bottomRight },
-        bottomLeft: { ...wallQuad.bottomLeft },
-      },
     };
   };
 
@@ -1604,17 +1506,6 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
     const curY = (e.clientY - rect.top) / rect.height;
 
     if (!dragTarget) {
-      if (isCalibratingWall) {
-        const distTL = Math.hypot(curX - wallQuad.topLeft.x, curY - wallQuad.topLeft.y);
-        const distTR = Math.hypot(curX - wallQuad.topRight.x, curY - wallQuad.topRight.y);
-        const distBR = Math.hypot(curX - wallQuad.bottomRight.x, curY - wallQuad.bottomRight.y);
-        const distBL = Math.hypot(curX - wallQuad.bottomLeft.x, curY - wallQuad.bottomLeft.y);
-        if (distTL < 0.08) { setHoveredTarget('wallPin_tl'); return; }
-        if (distTR < 0.08) { setHoveredTarget('wallPin_tr'); return; }
-        if (distBR < 0.08) { setHoveredTarget('wallPin_br'); return; }
-        if (distBL < 0.08) { setHoveredTarget('wallPin_bl'); return; }
-      }
-
       for (const light of lightsList) {
         const lightDist = Math.hypot(curX * 100 - light.x * 100, curY * 100 - light.y * 100);
         if (lightDist < 7) {
@@ -1670,10 +1561,6 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
     else if (dragTarget === 'canvasOrbit') {
       const newAngle = Math.max(-85, Math.min(85, Math.round(dragStart.current.origAngle + deltaX * 160)));
       const newPitch = Math.max(-75, Math.min(75, Math.round(dragStart.current.origPitch - deltaY * 150)));
-      if (isCalibratingWall) {
-        setWallCalibratedAngle(newAngle);
-        setWallCalibratedPitch(newPitch);
-      }
       setWallAngle(newAngle);
       setPitchAngle(newPitch);
     }
@@ -1683,10 +1570,6 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
         // Ctrl + Drag on Center triggers 3D orbit
         const newAngle = Math.max(-85, Math.min(85, Math.round(dragStart.current.origAngle + deltaX * 160)));
         const newPitch = Math.max(-75, Math.min(75, Math.round(dragStart.current.origPitch - deltaY * 150)));
-        if (isCalibratingWall) {
-          setWallCalibratedAngle(newAngle);
-          setWallCalibratedPitch(newPitch);
-        }
         setWallAngle(newAngle);
         setPitchAngle(newPitch);
         setIsSnappedX(false);
@@ -1726,25 +1609,21 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
       const newPitch = isCtrl
         ? Math.max(-75, Math.min(75, Math.round(dragStart.current.origPitch - deltaY * 150)))
         : Math.max(-30, Math.min(30, Math.round(dragStart.current.origPitch - deltaY * 100)));
-      if (isCalibratingWall) setWallCalibratedPitch(newPitch);
       setPitchAngle(newPitch);
     } else if (dragTarget === 'bottomCenter') {
       const newPitch = isCtrl
         ? Math.max(-75, Math.min(75, Math.round(dragStart.current.origPitch + deltaY * 150)))
         : Math.max(-30, Math.min(30, Math.round(dragStart.current.origPitch + deltaY * 100)));
-      if (isCalibratingWall) setWallCalibratedPitch(newPitch);
       setPitchAngle(newPitch);
     } else if (dragTarget === 'leftCenter') {
       const newAngle = isCtrl
         ? Math.max(-85, Math.min(85, Math.round(dragStart.current.origAngle - deltaX * 160)))
         : Math.max(-60, Math.min(60, Math.round(dragStart.current.origAngle - deltaX * 120)));
-      if (isCalibratingWall) setWallCalibratedAngle(newAngle);
       setWallAngle(newAngle);
     } else if (dragTarget === 'rightCenter') {
       const newAngle = isCtrl
         ? Math.max(-85, Math.min(85, Math.round(dragStart.current.origAngle + deltaX * 160)))
         : Math.max(-60, Math.min(60, Math.round(dragStart.current.origAngle + deltaX * 120)));
-      if (isCalibratingWall) setWallCalibratedAngle(newAngle);
       setWallAngle(newAngle);
     }
     // 6. Corner Pins (Proportional Scale or Ctrl: Z-Roll)
@@ -1785,20 +1664,6 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
     setIsSnappedY(false);
   };
 
-  const handleToggleWallCalibration = () => {
-    pushSnapshot();
-    if (isCalibratingWall) {
-      setIsCalibratingWall(false);
-      setIsWallAnchored(true);
-      setWallAngle(wallCalibratedAngle);
-      setPitchAngle(wallCalibratedPitch);
-    } else {
-      setIsCalibratingWall(true);
-      setIsWallAnchored(false);
-      setShowWallGrid(true);
-    }
-  };
-
   const handleAutoCenter = () => {
     pushSnapshot();
     setCenterX(0.5);
@@ -1809,10 +1674,6 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
     setZDistance(0);
     setPlacementMode('wall');
     setShadowContactOcclusion(40);
-    setWallCalibratedAngle(0);
-    setWallCalibratedPitch(0);
-    setIsCalibratingWall(false);
-    setIsWallAnchored(true);
   };
 
   const handlePlacementModeChange = (mode: 'wall' | 'shelf') => {
@@ -1867,8 +1728,6 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
     const halfW = scaleWidth / 2;
     const halfH = scaleWidth / artAspect / 2;
 
-    const finalWallAngle = isWallAnchored ? wallCalibratedAngle : wallAngle;
-    const finalPitchAngle = isWallAnchored ? wallCalibratedPitch : pitchAngle;
     const activeLight = lightsList.find((l) => l.id === activeLightId) || lightsList[0] || { x: 0.75, y: 0.25, z: 1.0, intensity: 100 };
 
     const updatedEnv: EnvironmentScene = {
@@ -1879,17 +1738,13 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
           centerX,
           centerY,
           scaleWidth,
-          wallAngle: finalWallAngle,
-          pitchDeg: finalPitchAngle,
+          wallAngle,
+          pitchDeg: pitchAngle,
           rollAngle,
           rollDeg: rollAngle,
           thicknessCm,
           zDistance,
           placementMode,
-          isWallAnchored,
-          wallCalibratedAngle,
-          wallCalibratedPitch,
-          wallQuad,
           lightsList,
           isSnappingEnabled,
           sunIntensity: activeLight.intensity ?? sunIntensity,
@@ -1989,17 +1844,14 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
       placementMode,
       lightPos3D: { x: activeLight.x, y: activeLight.y, z: activeLight.z },
       lightSource3D: { x: activeLight.x, y: activeLight.y, z: activeLight.z },
-      wallAngle: finalWallAngle,
-      pitchDeg: finalPitchAngle,
+      wallAngle,
+      pitchDeg: pitchAngle,
       reflectionAngleDeg,
       reflectionIntensity,
       reflectionScale,
       reflectionRoughness,
       reflectionType,
       wallHarmonization,
-      isWallAnchored,
-      wallCalibratedAngle,
-      wallCalibratedPitch,
       sunIntensity: activeLight.intensity ?? sunIntensity,
       ceilingLightsEnabled,
       ceilingLightTemp,
@@ -2262,7 +2114,7 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
                 right: 0,
                 bottom: 0,
                 pointerEvents: 'none',
-                opacity: isHovered || dragTarget !== null || isCalibratingWall ? 1 : 0,
+                opacity: isHovered || dragTarget !== null ? 1 : 0,
                 transition: 'opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
               }}
             >
@@ -2470,7 +2322,7 @@ export const CanvaMoldEditorModal: React.FC<CanvaMoldEditorModalProps> = ({ envi
               })}
 
               {/* 9 Interactive Vector Pin Handles for Frame Placement */}
-              {!isCalibratingWall && screenPins && (
+              {screenPins && (
                 <>
                   {/* 4 Corner Pins */}
                   <div
